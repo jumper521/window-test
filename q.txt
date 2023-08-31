@@ -1,6 +1,7 @@
 import datetime
 import time
 import boto3
+import time
 
 # S3バケット名の設定
 s3_bucket_name = 'mys3bucketname'
@@ -27,6 +28,15 @@ def get_from_timestamp():
 def get_to_timestamp(from_ts):
     return from_ts + (60 * 60 * 24) - 1
 
+# タスクのステータスをチェック
+def check_task_status(client, task_id):
+    while True:
+        response = client.describe_export_tasks(taskId=task_id)
+        status = response['exportTasks'][0]['status']['code']
+        if status in ['COMPLETED', 'FAILED', 'CANCELLED']:
+            return status
+        time.sleep(60)
+
 # Lambda関数のメイン処理
 def lambda_handler(event, context):
     from_ts = get_from_timestamp()
@@ -43,4 +53,10 @@ def lambda_handler(event, context):
             destination=s3_bucket_name,
             destinationPrefix=destination_prefix
         )
-        print(f"Export task for {log_group_name} started with task id {response['taskId']}")
+        
+        task_id = response['taskId']
+        print(f"Export task for {log_group_name} started with task id {task_id}")
+        
+        # タスクが完了するまで待つ
+        status = check_task_status(client, task_id)
+        print(f"Task {task_id} ended with status {status}")

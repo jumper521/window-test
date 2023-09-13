@@ -1,62 +1,132 @@
-import datetime
-import time
-import boto3
-import time
+RDSクラスターの停止:
 
-# S3バケット名の設定
-s3_bucket_name = 'mys3bucketname'
+rds:StopDBCluster
+特定時点へのデータ復元:
 
-# 対象となるCloudWatch Log Groupの名前と、対応するS3のプレフィックス（サブフォルダ）名
-log_group_names = [
-    '/aws/lambda/Function1',
-    '/aws/lambda/Function2'
-]
+rds:RestoreDBClusterToPointInTime
+rds:CreateDBCluster
+rds:DescribeDBClusters
+ステータスの確認:
 
-destination_prefixes = [
-    'Function1',
-    'Function2'
-]
+rds:DescribeDBClusters
+rds:Waiter/db-cluster-available
+スナップショットの取得:
 
-# 前日の0時0分0秒のタイムスタンプを取得
-def get_from_timestamp():
-    today = datetime.date.today()
-    yesterday = datetime.datetime.combine(today - datetime.timedelta(days=1), datetime.time(0, 0, 0))
-    timestamp = time.mktime(yesterday.timetuple())
-    return int(timestamp)
+rds:CreateDBClusterSnapshot
+Route53レコードの更新:
 
-# 前日の23時59分59秒のタイムスタンプを取得
-def get_to_timestamp(from_ts):
-    return from_ts + (60 * 60 * 24) - 1
+route53:ChangeResourceRecordSets（該当のDNSレコードを更新するため）
+DBリンクの作成:
 
-# タスクのステータスをチェック
-def check_task_status(client, task_id):
-    while True:
-        response = client.describe_export_tasks(taskId=task_id)
-        status = response['exportTasks'][0]['status']['code']
-        if status in ['COMPLETED', 'FAILED', 'CANCELLED']:
-            return status
-        time.sleep(60)
+rds:CreateDBLink
 
-# Lambda関数のメイン処理
-def lambda_handler(event, context):
-    from_ts = get_from_timestamp()
-    to_ts = get_to_timestamp(from_ts)
-    print('Timestamp: from_ts %s, to_ts %s' % (from_ts, to_ts))
 
-    client = boto3.client('logs')
-    
-    for log_group_name, destination_prefix in zip(log_group_names, destination_prefixes):
-        response = client.create_export_task(
-            logGroupName=log_group_name,
-            fromTime=from_ts * 1000,
-            to=to_ts * 1000,
-            destination=s3_bucket_name,
-            destinationPrefix=destination_prefix
-        )
-        
-        task_id = response['taskId']
-        print(f"Export task for {log_group_name} started with task id {task_id}")
-        
-        # タスクが完了するまで待つ
-        status = check_task_status(client, task_id)
-        print(f"Task {task_id} ended with status {status}")
+
+stages:
+  - stop_rds_cluster
+  - restore_rds
+  - verify_rds_status
+  - delete_db_and_snapshot
+  - update_route53
+  - create_db_link
+
+stop_rds_cluster:
+  stage: stop_rds_cluster
+  script:
+    - export AWS_ACCESS_KEY_ID=$YOUR_AWS_ACCESS_KEY
+    - export AWS_SECRET_ACCESS_KEY=$YOUR_AWS_SECRET_KEY
+    - export AWS_DEFAULT_REGION=$YOUR_AWS_REGION
+
+    # ① RDSクラスターを停止する
+    - aws rds stop-db-cluster --db-cluster-identifier $DB_CLUSTER_IDENTIFIER
+
+    # RDSクラスターが停止するのを待つ
+    - aws rds wait db-cluster-stopped --db-cluster-identifier $DB_CLUSTER_IDENTIFIER
+
+restore_rds:
+  stage: restore_rds
+  script:
+    - export AWS_ACCESS_KEY_ID=$YOUR_AWS_ACCESS_KEY
+    - export AWS_SECRET_ACCESS_KEY=$YOUR_AWS_SECRET_KEY
+    - export AWS_DEFAULT_REGION=$YOUR_AWS_REGION
+
+    # ② 特定時点へデータ復元する
+    - aws rds restore-db-cluster-to-point-in-time --source-db-cluster-identifier $DB_CLUSTER_IDENTIFIER --target-db-cluster-identifier $NEW_DB_CLUSTER_IDENTIFIER --restore-type copy-on-write --use-latest-restorable-time
+
+verify_rds_status:
+  stage: verify_rds_status
+  script:
+    - export AWS_ACCESS_KEY_ID=$YOUR_AWS_ACCESS_KEY
+    - export AWS_SECRET_ACCESS_KEY=$YOUR_AWS_SECRET_KEY
+    - export AWS_DEFAULT_REGION=$YOUR_AWS_REGION
+
+    # ② 特定時点へのデータ復元が完了し、DBが起動するのを待つ
+    - aws rds wait db-cluster-available --db-cluster-identifier $NEW_DB_CLUSTER_IDENTIFIER
+
+delete_db_and_snapshot:
+  stage: delete_db_and_snapshot
+  script:
+    - export AWS_ACCESS_KEY_ID=$YOUR_AWS_ACCESS_KEY
+    - export AWS_SECRET_ACCESS_KEY=$YOUR_AWS_SECRET_KEY
+    - export AWS_DEFAULT_REGION=$YOUR_AWS_REGION
+
+    # ③ 元DBを削除して、スナップショットを取得する
+    - aws rds delete-db-cluster --db-cluster-identifier $DB_CLUSTER_IDENTIFIER --skip-final-snapshot
+    - aws rds wait db-cluster-deleted --db-cluster-identifier $DB_CLUSTER_IDENTIFIER
+    - aws rds create-db-cluster-snapshot --db-cluster-identifier $NEW_DB_CLUSTER_IDENTIFIER --db-cluster-snapshot-identifier $SNAPSHOT_IDENTIFIER
+
+update_route53:
+  stage: update_route53
+  script:
+    # ⑤ Route53レコードを更新する（必要に応じて）
+    # ここにRoute53のコマンドを追加
+
+create_db_link:
+  stage: create_db_link
+  script:
+    # ⑥ DBリンクを作成する（必要に応じて）
+    # ここにDBリンクのコマンドを追加
+
+only:
+  - master  # マージされたときにのみ実行
+このスクリプトでは、各ステージごとにAWS CLIコマンドを実行し、必要なステータスの確認をwaitコマンドで行っています。各ステージが完了すると、次のステージに進みます。各ステージの成功または失敗は、GitLab CI/CDの結果として報告されます。
+
+これにより、RDSクラスターの停止、データ復元、ステータスの確認、スナップショットの取得、Route53レコードの更新、DBリンクの作成の順に操作が行われ、必要なステータスを待つことができます。
+
+
+
+
+User
+上記に実装するのため、AWSユーザの作成が必要と思いますが、必要な最低限の権限を教えていただけますでしょうか。
+ChatGPT
+RDSクラスターの停止、データ復元、ステータスの確認、スナップショットの取得、Route53レコードの更新、DBリンクの作成といった操作を実行するために、AWS IAM（Identity and Access Management）ユーザには以下の最低限の権限が必要です。これらの権限を持つカスタムポリシーを作成し、ユーザにアタッチすることができます。
+
+以下は、それぞれの操作に対するポリシーの一般的な権限の例です。ただし、実際の環境に合わせて適切なリソースおよびアクションを指定することが重要です。必要に応じてポリシーをカスタマイズしてください。
+
+RDSクラスターの停止:
+
+rds:StopDBCluster
+特定時点へのデータ復元:
+
+rds:RestoreDBClusterToPointInTime
+rds:CreateDBCluster
+rds:DescribeDBClusters
+ステータスの確認:
+
+rds:DescribeDBClusters
+rds:Waiter/db-cluster-available
+スナップショットの取得:
+
+rds:CreateDBClusterSnapshot
+Route53レコードの更新:
+
+route53:ChangeResourceRecordSets（該当のDNSレコードを更新するため）
+DBリンクの作成:
+
+rds:CreateDBLink
+これらのアクションに対するポリシーをまとめてカスタムIAMポリシーに設定し、それをIAMユーザにアタッチします。ただし、セキュリティを確保するために最小特権の原則に従い、ユーザには必要な最低限の権限のみを付与することが重要です。操作が成功するかどうかを確認するために、詳細なIAMポリシーのデバッグとテストが必要です。
+
+
+
+
+

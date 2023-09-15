@@ -2,6 +2,15 @@
 <html>
 <head>
     <title>AWS Lambda Function</title>
+    <style>
+        body {
+            background-color: blue; /* 背景色をブルーに設定 */
+        }
+        p {
+            color: white; /* テキストの色を白に設定 */
+            padding: 10px; /* テキストの周りに余白を追加 */
+        }
+    </style>
 </head>
 <body>
     <p>これは古いバージョンです。</p>

@@ -1,100 +1,25 @@
-{
-  "Comment": "RDS Cluster Maintenance Workflow",
-  "StartAt": "StopRDSCluster",
-  "States": {
-    "StopRDSCluster": {
-      "Type": "Task",
-      "Resource": "arn:aws:lambda:REGION:ACCOUNT_ID:function:StopRDSClusterLambda",
-      "Next": "CheckDBStatus",
-      "Catch": [
-        {
-          "ErrorEquals": ["States.ALL"],
-          "Next": "FailState"
-        }
-      ]
-    },
-    "CheckDBStatus": {
-      "Type": "Task",
-      "Resource": "arn:aws:lambda:REGION:ACCOUNT_ID:function:CheckDBStatusLambda",
-      "Retry": [
-        {
-          "ErrorEquals": ["DBClusterStatusNotAvailable"],
-          "MaxAttempts": 5,
-          "IntervalSeconds": 60
-        }
-      ],
-      "Next": "RestoreDBSnapshot",
-      "Catch": [
-        {
-          "ErrorEquals": ["States.ALL"],
-          "Next": "FailState"
-        }
-      ]
-    },
-    "RestoreDBSnapshot": {
-      "Type": "Task",
-      "Resource": "arn:aws:lambda:REGION:ACCOUNT_ID:function:RestoreDBSnapshotLambda",
-      "Next": "CheckRestoredDBStatus",
-      "Catch": [
-        {
-          "ErrorEquals": ["States.ALL"],
-          "Next": "FailState"
-        }
-      ]
-    },
-    "CheckRestoredDBStatus": {
-      "Type": "Task",
-      "Resource": "arn:aws:lambda:REGION:ACCOUNT_ID:function:CheckRestoredDBStatusLambda",
-      "Retry": [
-        {
-          "ErrorEquals": ["DBInstanceStatusNotAvailable"],
-          "MaxAttempts": 5,
-          "IntervalSeconds": 60
-        }
-      ],
-      "Next": "DeleteDBAndSnapshot",
-      "Catch": [
-        {
-          "ErrorEquals": ["States.ALL"],
-          "Next": "FailState"
-        }
-      ]
-    },
-    "DeleteDBAndSnapshot": {
-      "Type": "Task",
-      "Resource": "arn:aws:lambda:REGION:ACCOUNT_ID:function:DeleteDBAndSnapshotLambda",
-      "Next": "UpdateRoute53Record",
-      "Catch": [
-        {
-          "ErrorEquals": ["States.ALL"],
-          "Next": "FailState"
-        }
-      ]
-    },
-    "UpdateRoute53Record": {
-      "Type": "Task",
-      "Resource": "arn:aws:lambda:REGION:ACCOUNT_ID:function:UpdateRoute53RecordLambda",
-      "Next": "CreateDBLink",
-      "Catch": [
-        {
-          "ErrorEquals": ["States.ALL"],
-          "Next": "FailState"
-        }
-      ]
-    },
-    "CreateDBLink": {
-      "Type": "Task",
-      "Resource": "arn:aws:lambda:REGION:ACCOUNT_ID:function:CreateDBLinkLambda",
-      "End": true,
-      "Catch": [
-        {
-          "ErrorEquals": ["States.ALL"],
-          "Next": "FailState"
-        }
-      ]
-    },
-    "FailState": {
-      "Type": "Fail"
+import boto3
+
+ec2 = boto3.client('ec2')
+
+def lambda_handler(event, context):
+    # EC2インスタンスのステータスを確認
+    instance_ids = ['i-XXXXXXXXXXXX', 'i-YYYYYYYYYYYY']  # 起動するEC2インスタンスのIDリスト
+    response = ec2.describe_instances(InstanceIds=instance_ids)
+
+    for reservation in response['Reservations']:
+        for instance in reservation['Instances']:
+            instance_id = instance['InstanceId']
+            instance_state = instance['State']['Name']
+            
+            if instance_state == 'stopped':
+                # 停止中のインスタンスを起動
+                ec2.start_instances(InstanceIds=[instance_id])
+                print(f'Starting instance {instance_id}')
+            else:
+                print(f'Instance {instance_id} is already running')
+
+    return {
+        'statusCode': 200,
+        'body': 'Lambda function executed successfully!'
     }
-  }
-}

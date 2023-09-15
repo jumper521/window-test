@@ -61,36 +61,22 @@ if len(name_tag_values) > 0:
     new_name_tag_value = name_tag_values[0]
 
     # CodeDeployデプロイメントグループのタググループを更新
-    response = codedeploy_client.get_deployment_group(
-        applicationName=application_name,
-        deploymentGroupName=deployment_group_name
-    )
-
-    deployment_group_info = response['deploymentGroupInfo']
-    if 'targetGroupInfo' in deployment_group_info:
-        target_group_info = deployment_group_info['targetGroupInfo']
-        if tag_key in target_group_info:
-            target_group_info[tag_key]['tags'] = [{'Key': tag_key, 'Value': new_name_tag_value}]
-
-    # 更新されたデプロイメントグループの情報でデプロイメントグループを更新
-    codedeploy_client.update_deployment_group(
+    response = codedeploy_client.update_deployment_group(
         applicationName=application_name,
         currentDeploymentGroupName=deployment_group_name,
-        deploymentGroupName=deployment_group_name,
+        newDeploymentGroupName=deployment_group_name,
         deploymentConfigName='CodeDeployDefault.AllAtOnce',
         ec2TagSet={
             'ec2TagSetList': [
-                {
-                    'ec2TagFilter': [
-                        {
-                            'Key': tag_key,
-                            'Value': new_name_tag_value,
-                        }
-                    ]
-                }
+                [
+                    {
+                        'Key': tag_key,
+                        'Value': new_name_tag_value,
+                        'Type': 'KEY_AND_VALUE'
+                    },
+                ],
             ]
         },
-        autoScalingGroups=[],
         serviceRoleArn='arn:aws:iam::123456789012:role/YourCodeDeployServiceRole'
     )
 

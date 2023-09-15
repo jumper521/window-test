@@ -7,11 +7,18 @@ application_name = 'YourApplicationName'
 deployment_group_name = 'YourDeploymentGroupName'
 tag_key = 'YourTagKey'
 
-# 既存のEC2インスタンスのIDを指定
-existing_instance_ids = ['i-XXXXXXXXXXXX', 'i-YYYYYYYYYYYY']
+# 既存のEC2インスタンスのIDとNameタグを指定
+existing_instances = [
+    {'instance_id': 'i-XXXXXXXXXXXX', 'name_tag': 'NameTagForInstance1'},
+    {'instance_id': 'i-YYYYYYYYYYYY', 'name_tag': 'NameTagForInstance2'}
+]
 
 ec2 = boto3.client('ec2', region_name=aws_region)
 codedeploy_client = boto3.client('codedeploy', region_name=aws_region)
+
+def get_instance_state(instance_id):
+    response = ec2.describe_instances(InstanceIds=[instance_id])
+    return response['Reservations'][0]['Instances'][0]['State']['Name']
 
 def get_instance_name(instance_id):
     response = ec2.describe_instances(InstanceIds=[instance_id])
@@ -27,59 +34,66 @@ def get_instance_name(instance_id):
                 break
     return name_tag
 
-def start_existing_ec2_instances(instance_ids):
-    for instance_id in instance_ids:
-        # 停止中のEC2インスタンスを起動
+# 既存のEC2インスタンスの状態を確認し、停止中のインスタンスの Name タグを Value として使用
+name_tag_values = []
+for instance_info in existing_instances:
+    instance_id = instance_info['instance_id']
+    instance_state = get_instance_state(instance_id)
+    
+    if instance_state == 'stopped':
+        # 停止中のインスタンスを起動
         ec2.start_instances(InstanceIds=[instance_id])
         print(f'Starting EC2 instance {instance_id}')
 
         # インスタンスが実行中になるのを待機
         while True:
             time.sleep(10)  # 10秒ごとにチェック
-            response = ec2.describe_instances(InstanceIds=[instance_id])
-            new_state = response['Reservations'][0]['Instances'][0]['State']['Name']
-            if new_state == 'running':
+            instance_state = get_instance_state(instance_id)
+            if instance_state == 'running':
                 print(f'EC2 instance {instance_id} is now running')
                 break
 
-# 既存のEC2インスタンスを起動
-start_existing_ec2_instances(existing_instance_ids)
+    # Name タグの値を取得
+    name_tag_values.append(get_instance_name(instance_id))
 
-# 既存のEC2インスタンスの Name タグを取得
-name_tag_values = [get_instance_name(instance_id) for instance_id in existing_instance_ids]
+# Name タグの値が取得できた場合、最初の値を新しいタグの Value として使用
+if len(name_tag_values) > 0:
+    new_name_tag_value = name_tag_values[0]
 
-# CodeDeployデプロイメントグループのタググループを更新
-response = codedeploy_client.get_deployment_group(
-    applicationName=application_name,
-    deploymentGroupName=deployment_group_name
-)
+    # CodeDeployデプロイメントグループのタググループを更新
+    response = codedeploy_client.get_deployment_group(
+        applicationName=application_name,
+        deploymentGroupName=deployment_group_name
+    )
 
-deployment_group_info = response['deploymentGroupInfo']
-if 'targetGroupInfo' in deployment_group_info:
-    target_group_info = deployment_group_info['targetGroupInfo']
-    if tag_key in target_group_info:
-        target_group_info[tag_key]['tags'] = [{ 'Key': tag_key, 'Value': name_tag_values[0] }]
+    deployment_group_info = response['deploymentGroupInfo']
+    if 'targetGroupInfo' in deployment_group_info:
+        target_group_info = deployment_group_info['targetGroupInfo']
+        if tag_key in target_group_info:
+            target_group_info[tag_key]['tags'] = [{'Key': tag_key, 'Value': new_name_tag_value}]
 
-# 更新されたデプロイメントグループの情報でデプロイメントグループを更新
-codedeploy_client.update_deployment_group(
-    applicationName=application_name,
-    currentDeploymentGroupName=deployment_group_name,
-    deploymentGroupName=deployment_group_name,
-    deploymentConfigName='CodeDeployDefault.AllAtOnce',
-    ec2TagSet={
-        'ec2TagSetList': [
-            {
-                'ec2TagFilter': [
-                    {
-                        'Key': tag_key,
-                        'Value': name_tag_values[0],
-                    }
-                ]
-            }
-        ]
-    },
-    autoScalingGroups=[],
-    serviceRoleArn='arn:aws:iam::123456789012:role/YourCodeDeployServiceRole'
-)
+    # 更新されたデプロイメントグループの情報でデプロイメントグループを更新
+    codedeploy_client.update_deployment_group(
+        applicationName=application_name,
+        currentDeploymentGroupName=deployment_group_name,
+        deploymentGroupName=deployment_group_name,
+        deploymentConfigName='CodeDeployDefault.AllAtOnce',
+        ec2TagSet={
+            'ec2TagSetList': [
+                {
+                    'ec2TagFilter': [
+                        {
+                            'Key': tag_key,
+                            'Value': new_name_tag_value,
+                        }
+                    ]
+                }
+            ]
+        },
+        autoScalingGroups=[],
+        serviceRoleArn='arn:aws:iam::123456789012:role/YourCodeDeployServiceRole'
+    )
 
-print('EC2 instance start and CodeDeploy deployment group updated successfully!')
+    print('EC2 instance start and CodeDeploy deployment group updated successfully!')
+else:
+    print('No stopped instances found.')

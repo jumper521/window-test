@@ -13,6 +13,20 @@ existing_instance_ids = ['i-XXXXXXXXXXXX', 'i-YYYYYYYYYYYY']
 ec2 = boto3.client('ec2', region_name=aws_region)
 codedeploy_client = boto3.client('codedeploy', region_name=aws_region)
 
+def get_instance_name(instance_id):
+    response = ec2.describe_instances(InstanceIds=[instance_id])
+    name_tag = None
+    for reservation in response['Reservations']:
+        for instance in reservation['Instances']:
+            tags = instance.get('Tags', [])
+            for tag in tags:
+                if tag['Key'] == 'Name':
+                    name_tag = tag['Value']
+                    break
+            if name_tag:
+                break
+    return name_tag
+
 def start_existing_ec2_instances(instance_ids):
     for instance_id in instance_ids:
         # 停止中のEC2インスタンスを起動
@@ -31,6 +45,9 @@ def start_existing_ec2_instances(instance_ids):
 # 既存のEC2インスタンスを起動
 start_existing_ec2_instances(existing_instance_ids)
 
+# 既存のEC2インスタンスの Name タグを取得
+name_tag_values = [get_instance_name(instance_id) for instance_id in existing_instance_ids]
+
 # CodeDeployデプロイメントグループのタググループを更新
 response = codedeploy_client.get_deployment_group(
     applicationName=application_name,
@@ -41,7 +58,7 @@ deployment_group_info = response['deploymentGroupInfo']
 if 'targetGroupInfo' in deployment_group_info:
     target_group_info = deployment_group_info['targetGroupInfo']
     if tag_key in target_group_info:
-        target_group_info[tag_key]['tags'] = [{ 'Key': tag_key, 'Value': existing_instance_ids[0] }]
+        target_group_info[tag_key]['tags'] = [{ 'Key': tag_key, 'Value': name_tag_values[0] }]
 
 # 更新されたデプロイメントグループの情報でデプロイメントグループを更新
 codedeploy_client.update_deployment_group(
@@ -55,8 +72,7 @@ codedeploy_client.update_deployment_group(
                 'ec2TagFilter': [
                     {
                         'Key': tag_key,
-                        'Value': existing_instance_ids[0],
-                        'Type': 'KEY_AND_VALUE'
+                        'Value': name_tag_values[0],
                     }
                 ]
             }

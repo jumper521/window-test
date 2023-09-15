@@ -1,35 +1,80 @@
 import boto3
 import time
 
-ec2 = boto3.client('ec2')
+# AWSリージョン、アプリケーション名、デプロイメントグループ名、タググループ名、タグキー、タグ値を指定
+aws_region = 'YOUR_AWS_REGION'
+application_name = 'YourApplicationName'
+deployment_group_name = 'YourDeploymentGroupName'
+tag_group_name = 'YourTagGroupName'
+tag_key = 'YourTagKey'
+tag_value = 'YourTagValue'
 
-def lambda_handler(event, context):
-    # EC2インスタンスのステータスを確認
-    instance_ids = ['i-XXXXXXXXXXXX', 'i-YYYYYYYYYYYY']  # 起動するEC2インスタンスのIDリスト
-    response = ec2.describe_instances(InstanceIds=instance_ids)
+ec2 = boto3.client('ec2', region_name=aws_region)
+codedeploy_client = boto3.client('codedeploy', region_name=aws_region)
 
-    for reservation in response['Reservations']:
-        for instance in reservation['Instances']:
-            instance_id = instance['InstanceId']
-            instance_state = instance['State']['Name']
-            
-            if instance_state == 'stopped':
-                # 停止中のインスタンスを起動
-                ec2.start_instances(InstanceIds=[instance_id])
-                print(f'Starting instance {instance_id}')
+def start_ec2_instance(instance_id):
+    # 停止中のEC2インスタンスを起動
+    ec2.start_instances(InstanceIds=[instance_id])
+    print(f'Starting EC2 instance {instance_id}')
 
-                # インスタンスが実行中になるまで待機
-                while True:
-                    time.sleep(10)  # 10秒ごとにチェック
-                    response = ec2.describe_instances(InstanceIds=[instance_id])
-                    new_state = response['Reservations'][0]['Instances'][0]['State']['Name']
-                    if new_state == 'running':
-                        print(f'Instance {instance_id} is now running')
-                        break
-            else:
-                print(f'Instance {instance_id} is already running')
+    # インスタンスが実行中になるのを待機
+    while True:
+        time.sleep(10)  # 10秒ごとにチェック
+        response = ec2.describe_instances(InstanceIds=[instance_id])
+        new_state = response['Reservations'][0]['Instances'][0]['State']['Name']
+        if new_state == 'running':
+            print(f'EC2 instance {instance_id} is now running')
+            break
 
-    return {
-        'statusCode': 200,
-        'body': 'Lambda function executed successfully!'
-    }
+def update_code_deploy_deployment_group():
+    # CodeDeployデプロイメントグループのタググループを更新
+    response = codedeploy_client.get_deployment_group(
+        applicationName=application_name,
+        deploymentGroupName=deployment_group_name
+    )
+
+    deployment_group_info = response['deploymentGroupInfo']
+    if 'targetGroupInfo' in deployment_group_info:
+        target_group_info = deployment_group_info['targetGroupInfo']
+        if tag_group_name in target_group_info:
+            target_group_info[tag_group_name]['tags'] = [{ 'Key': tag_key, 'Value': tag_value }]
+
+    # 更新されたデプロイメントグループの情報でデプロイメントグループを更新
+    codedeploy_client.update_deployment_group(
+        applicationName=application_name,
+        currentDeploymentGroupName=deployment_group_name,
+        deploymentGroupName=deployment_group_name,
+        deploymentConfigName='CodeDeployDefault.AllAtOnce',
+        ec2TagSet={
+            'ec2TagSetList': [
+                {
+                    'ec2TagFilter': [
+                        {
+                            'Key': tag_key,
+                            'Value': tag_value,
+                            'Type': 'KEY_AND_VALUE'
+                        }
+                    ]
+                }
+            ]
+        },
+        autoScalingGroups=[],
+        serviceRoleArn='arn:aws:iam::123456789012:role/YourCodeDeployServiceRole'
+    )
+
+# EC2インスタンスのIDリストを指定
+instance_ids = ['i-XXXXXXXXXXXX', 'i-YYYYYYYYYYYY']
+
+for instance_id in instance_ids:
+    response = ec2.describe_instances(InstanceIds=[instance_id])
+    instance_state = response['Reservations'][0]['Instances'][0]['State']['Name']
+
+    if instance_state == 'stopped':
+        start_ec2_instance(instance_id)
+    else:
+        print(f'EC2 instance {instance_id} is already running')
+
+# CodeDeployデプロイメントグループのタググループを更新
+update_code_deploy_deployment_group()
+
+print('EC2 instance start and CodeDeploy deployment group updated successfully!')

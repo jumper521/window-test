@@ -3,45 +3,33 @@ import boto3
 ec2_client = boto3.client('ec2')
 codedeploy_client = boto3.client('codedeploy')
 
-def get_codedeploy_tag_filter_name(deployment_group_name):
+# 事前に定義した2つのインスタンスID
+instance_id_1 = 'i-1234567890abcdef01'
+instance_id_2 = 'i-0987654321fedcba0'
+
+def get_codedeploy_instance_ids(deployment_group_name):
     response = codedeploy_client.get_deployment_group(
         applicationName='your-application-name',
         deploymentGroupName=deployment_group_name
     )
-    return response['deploymentGroupInfo']['ec2TagFilters'][0]['Key']
+    return response['deploymentGroupInfo']['ec2TagFilters'][0]['Value']
 
 def lambda_handler(event, context):
     # CodeDeployデプロイメントグループの名前を指定
     deployment_group_name = 'your-deployment-group-name'
 
-    # CodeDeployデプロイメントグループのタグフィルタ名を取得
-    codedeploy_tag_filter_name = get_codedeploy_tag_filter_name(deployment_group_name)
+    # CodeDeployデプロイメントグループに含まれるインスタンスのIDを取得
+    instance_ids = get_codedeploy_instance_ids(deployment_group_name)
 
-    # インスタンスを取得
-    instances = ec2_client.describe_instances(
-        Filters=[
-            {'Name': 'tag-key', 'Values': ['1a', '1c']}
-        ]
-    )
-
-    if not instances['Reservations']:
+    if not instance_ids:
         return {
             'statusCode': 200,
             'body': 'インスタンスが見つかりません。'
         }
 
-    # インスタンスのIDとタグ情報を取得
-    instance_info = []
-    for reservation in instances['Reservations']:
-        for instance in reservation['Instances']:
-            instance_id = instance['InstanceId']
-            tags = instance.get('Tags', [])
-            instance_info.append((instance_id, tags))
-
-    # インスタンスを停止する
-    for instance_id, tags in instance_info:
-        # インスタンスがCodeDeployのタグフィルタ名と一致しない場合、停止
-        if not any(tag['Key'] == codedeploy_tag_filter_name for tag in tags):
+    # 事前に定義したインスタンスIDと比較して、異なる場合に停止
+    for instance_id in instance_ids:
+        if instance_id != instance_id_1 and instance_id != instance_id_2:
             ec2_client.stop_instances(InstanceIds=[instance_id])
 
     return {

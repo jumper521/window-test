@@ -1,53 +1,48 @@
 import boto3
 
 ec2_client = boto3.client('ec2')
+codedeploy_client = boto3.client('codedeploy')
+
+def get_codedeploy_tag_filter_name(deployment_group_name):
+    response = codedeploy_client.get_deployment_group(
+        applicationName='your-application-name',
+        deploymentGroupName=deployment_group_name
+    )
+    return response['deploymentGroupInfo']['ec2TagFilters'][0]['Key']
 
 def lambda_handler(event, context):
-    # タグフィルタ名を指定
-    tag_filter_name = 'your-tag-filter-name'
+    # CodeDeployデプロイメントグループの名前を指定
+    deployment_group_name = 'your-deployment-group-name'
+
+    # CodeDeployデプロイメントグループのタグフィルタ名を取得
+    codedeploy_tag_filter_name = get_codedeploy_tag_filter_name(deployment_group_name)
 
     # インスタンスを取得
     instances = ec2_client.describe_instances(
         Filters=[
-            {'Name': 'tag-key', 'Values': [tag_filter_name]}
+            {'Name': 'tag-key', 'Values': ['1a', '1c']}
         ]
     )
 
     if not instances['Reservations']:
         return {
             'statusCode': 200,
-            'body': '指定されたタグのインスタンスが見つかりません。'
+            'body': 'インスタンスが見つかりません。'
         }
 
-    # インスタンスのタグ情報を取得
-    instance_tags = instances['Reservations'][0]['Instances'][0]['Tags']
+    # インスタンスのIDとタグ情報を取得
+    instance_info = []
+    for reservation in instances['Reservations']:
+        for instance in reservation['Instances']:
+            instance_id = instance['InstanceId']
+            tags = instance.get('Tags', [])
+            instance_info.append((instance_id, tags))
 
-    # タグ '1a' が存在するか確認
-    tag_1a_exists = any(tag['Key'] == '1a' for tag in instance_tags)
-    
-    # インスタンスのIDを取得
-    instance_id = instances['Reservations'][0]['Instances'][0]['InstanceId']
-
-    if tag_1a_exists:
-        # '1a' タグが存在する場合、'1c' タグのインスタンスを停止
-        instances_1c = ec2_client.describe_instances(
-            Filters=[
-                {'Name': 'tag-key', 'Values': ['1c']}
-            ]
-        )
-
-        if instances_1c['Reservations']:
-            ec2_client.stop_instances(InstanceIds=[instances_1c['Reservations'][0]['Instances'][0]['InstanceId']])
-    else:
-        # '1c' タグが存在する場合、'1a' タグのインスタンスを停止
-        instances_1a = ec2_client.describe_instances(
-            Filters=[
-                {'Name': 'tag-key', 'Values': ['1a']}
-            ]
-        )
-
-        if instances_1a['Reservations']:
-            ec2_client.stop_instances(InstanceIds=[instances_1a['Reservations'][0]['Instances'][0]['InstanceId']])
+    # インスタンスを停止する
+    for instance_id, tags in instance_info:
+        # インスタンスがCodeDeployのタグフィルタ名と一致しない場合、停止
+        if not any(tag['Key'] == codedeploy_tag_filter_name for tag in tags):
+            ec2_client.stop_instances(InstanceIds=[instance_id])
 
     return {
         'statusCode': 200,

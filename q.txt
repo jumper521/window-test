@@ -1,58 +1,49 @@
 import boto3
 
-def lambda_handler(event, context):
-    # CloudWatch Logs ロググループ名とサブスクリプションフィルタ名を指定
-    log_group_name = 'YOUR_LOG_GROUP_NAME'
-    filter_name = 'YOUR_FILTER_NAME'
-
-    # CloudWatch Logs クライアントを作成
-    logs_client = boto3.client('logs')
+def stop_instances_by_codedeploy_tag(deployment_group_name):
+    ec2_client = boto3.client('ec2')
+    codedeploy_client = boto3.client('codedeploy')
 
     try:
-        # サブスクリプションフィルタを削除
-        logs_client.delete_subscription_filter(
-            logGroupName=log_group_name,
-            filterName=filter_name
+        # CodeDeployデプロイメントグループからタグフィルタ名を取得
+        response = codedeploy_client.get_deployment_group(
+            applicationName='YOUR_APPLICATION_NAME',
+            deploymentGroupName=deployment_group_name
         )
+
+        # タグフィルタ名を取得
+        tag_filter_name = response['deploymentGroupInfo']['ec2TagFilters'][0]['Value']
+
+        # タグフィルタ名から関連するEC2インスタンスを取得
+        instances = ec2_client.describe_instances(
+            Filters=[
+                {'Name': f'tag:{tag_filter_name}', 'Values': [tag_filter_name]}
+            ]
+        )
+
+        instance_ids_to_stop = []
         
-        return {
-            'statusCode': 200,
-            'body': f'Subscription filter {filter_name} in log group {log_group_name} deleted successfully.'
-        }
+        # インスタンスIDをリストに追加
+        for reservation in instances['Reservations']:
+            for instance in reservation['Instances']:
+                instance_ids_to_stop.append(instance['InstanceId'])
+
+        # インスタンスを停止
+        if instance_ids_to_stop:
+            ec2_client.stop_instances(InstanceIds=instance_ids_to_stop)
+            return f'Successfully stopped instances: {instance_ids_to_stop}'
+        else:
+            return 'No instances found with the specified tag filter name.'
     except Exception as e:
-        return {
-            'statusCode': 500,
-            'body': f'Error: {str(e)}'
-        }
-
-
-import boto3
+        return f'Error: {str(e)}'
 
 def lambda_handler(event, context):
-    # CloudWatch Logs ロググループ名を指定
-    log_group_name = 'YOUR_LOG_GROUP_NAME'
+    # CodeDeployデプロイメントグループ名を指定
+    deployment_group_name = 'YOUR_DEPLOYMENT_GROUP_NAME'
 
-    # SNS トピックの ARN を指定
-    sns_topic_arn = 'YOUR_SNS_TOPIC_ARN'
-
-    # CloudWatch Logs クライアントを作成
-    logs_client = boto3.client('logs')
-
-    try:
-        # サブスクリプションフィルタを作成
-        logs_client.put_subscription_filter(
-            logGroupName=log_group_name,
-            filterName='MyFilter',  # フィルタ名を指定
-            filterPattern='',  # フィルタパターンを指定
-            destinationArn=sns_topic_arn  # SNS トピックの ARN を指定
-        )
-
-        return {
-            'statusCode': 200,
-            'body': 'Subscription filter created successfully.'
-        }
-    except Exception as e:
-        return {
-            'statusCode': 500,
-            'body': f'Error: {str(e)}'
-        }
+    result = stop_instances_by_codedeploy_tag(deployment_group_name)
+    
+    return {
+        'statusCode': 200,
+        'body': result
+    }

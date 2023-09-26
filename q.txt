@@ -1,55 +1,38 @@
 import boto3
 import time
 
-def stop_instances_by_codedeploy_tag(deployment_group_name):
-    ec2_client = boto3.client('ec2')
-    codedeploy_client = boto3.client('codedeploy')
+# ターゲットグループ名とリージョンを指定
+target_group_name = 'YourTargetGroupName'
+region = 'YourRegion'
 
-    try:
-        # CodeDeployデプロイメントグループからタグフィルタ名を取得
-        response = codedeploy_client.get_deployment_group(
-            applicationName='YOUR_APPLICATION_NAME',
-            deploymentGroupName=deployment_group_name
-        )
+# Boto3 クライアントを作成
+elbv2_client = boto3.client('elbv2', region_name=region)
 
-        # タグフィルタ名を取得
-        tag_filter_name = response['deploymentGroupInfo']['ec2TagFilters'][0]['Value']
-
-        # タグフィルタ名から関連するEC2インスタンスを取得
-        instances = ec2_client.describe_instances(
-            Filters=[
-                {'Name': f'tag:{tag_filter_name}', 'Values': [tag_filter_name]}
-            ]
-        )
-
-        instance_ids_to_stop = []
+def check_target_health(target_group_arn):
+    while True:
+        # ターゲットグループのヘルスチェックを取得
+        response = elbv2_client.describe_target_health(TargetGroupArn=target_group_arn)
         
-        # インスタンスIDをリストに追加
-        for reservation in instances['Reservations']:
-            for instance in reservation['Instances']:
-                instance_ids_to_stop.append(instance['InstanceId'])
-
-        # インスタンスを停止
-        if instance_ids_to_stop:
-            ec2_client.stop_instances(InstanceIds=instance_ids_to_stop)
-            
-            # インスタンスがすべて stopped になるまで待つ
-            for instance_id in instance_ids_to_stop:
-                ec2_client.get_waiter('instance_stopped').wait(InstanceIds=[instance_id])
-
-            return f'Successfully stopped instances: {instance_ids_to_stop}'
-        else:
-            return 'No instances found with the specified tag filter name.'
-    except Exception as e:
-        return f'Error: {str(e)}'
+        # ターゲットのヘルスステータスを確認
+        target_health = response['TargetHealthDescriptions'][0]
+        target_state = target_health['TargetHealth']['State']
+        
+        if target_state == 'healthy':
+            print('Target is healthy.')
+            break
+        
+        print(f'Target is {target_state}. Waiting for it to become healthy...')
+        time.sleep(10)  # 10秒ごとに確認
 
 def lambda_handler(event, context):
-    # CodeDeployデプロイメントグループ名を指定
-    deployment_group_name = 'YOUR_DEPLOYMENT_GROUP_NAME'
-
-    result = stop_instances_by_codedeploy_tag(deployment_group_name)
+    # ターゲットグループの ARN を取得
+    response = elbv2_client.describe_target_groups(Names=[target_group_name])
+    target_group_arn = response['TargetGroups'][0]['TargetGroupArn']
+    
+    # ターゲットのヘルスチェックを監視
+    check_target_health(target_group_arn)
     
     return {
         'statusCode': 200,
-        'body': result
+        'body': 'Lambda function executed successfully!'
     }

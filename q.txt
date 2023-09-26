@@ -1,23 +1,35 @@
 import boto3
 
 def lambda_handler(event, context):
-    # RDSクラスターの識別子を指定
-    cluster_identifier = 'YOUR_RDS_CLUSTER_IDENTIFIER'
+    # 新しいRDSクラスターの識別子を指定
+    cluster_identifier = 'YOUR_NEW_RDS_CLUSTER_IDENTIFIER'
+
+    # スナップショットの識別子を指定
+    snapshot_identifier = 'YOUR_RDS_SNAPSHOT_IDENTIFIER'
 
     # RDSクライアントを作成
     rds_client = boto3.client('rds')
 
     try:
-        # RDSクラスターを削除
-        response = rds_client.delete_db_cluster(
+        # RDSクラスターをスナップショットから復元
+        response = rds_client.restore_db_cluster_from_snapshot(
             DBClusterIdentifier=cluster_identifier,
-            SkipFinalSnapshot=True  # 最終スナップショットを作成しない場合
+            SnapshotIdentifier=snapshot_identifier,
+            Engine='aurora-postgresql',  # PostgreSQLエンジンを指定
+            EngineVersion='12.5',  # PostgreSQLエンジンのバージョンを指定
+            AvailabilityZones=['us-east-1a', 'us-east-1b'],  # 利用可能なゾーンを指定
+            DBSubnetGroupName='default',  # サブネットグループ名を指定
+            VpcSecurityGroupIds=['security-group-id-1', 'security-group-id-2'],  # セキュリティグループIDを指定
+            Port=5432,  # PostgreSQLデータベースのポート番号を指定
+            MasterUsername='your-master-username',  # マスターユーザー名を指定
+            MasterUserPassword='your-master-password',  # マスターパスワードを指定
+            ScalingConfiguration={'MinCapacity': 2}  # クラスターのスケーリング設定を指定
         )
 
-        # 削除リクエストの応答を確認
-        if 'DBCluster' in response and response['DBCluster']['Status'] == 'deleting':
-            return f'RDS cluster {cluster_identifier} deletion request accepted.'
+        # 復元リクエストの応答を確認
+        if 'DBCluster' in response and response['DBCluster']['Status'] == 'creating':
+            return f'RDS cluster {cluster_identifier} creation request accepted.'
         else:
-            return f'Failed to initiate deletion of RDS cluster {cluster_identifier}.'
+            return f'Failed to initiate creation of RDS cluster {cluster_identifier}.'
     except Exception as e:
         return f'Error: {str(e)}'

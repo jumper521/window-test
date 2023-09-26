@@ -1,49 +1,23 @@
 import boto3
 
-def stop_instances_by_codedeploy_tag(deployment_group_name):
-    ec2_client = boto3.client('ec2')
-    codedeploy_client = boto3.client('codedeploy')
+def lambda_handler(event, context):
+    # RDSクラスターの識別子を指定
+    cluster_identifier = 'YOUR_RDS_CLUSTER_IDENTIFIER'
+
+    # RDSクライアントを作成
+    rds_client = boto3.client('rds')
 
     try:
-        # CodeDeployデプロイメントグループからタグフィルタ名を取得
-        response = codedeploy_client.get_deployment_group(
-            applicationName='YOUR_APPLICATION_NAME',
-            deploymentGroupName=deployment_group_name
+        # RDSクラスターを削除
+        response = rds_client.delete_db_cluster(
+            DBClusterIdentifier=cluster_identifier,
+            SkipFinalSnapshot=True  # 最終スナップショットを作成しない場合
         )
 
-        # タグフィルタ名を取得
-        tag_filter_name = response['deploymentGroupInfo']['ec2TagFilters'][0]['Value']
-
-        # タグフィルタ名から関連するEC2インスタンスを取得
-        instances = ec2_client.describe_instances(
-            Filters=[
-                {'Name': f'tag:{tag_filter_name}', 'Values': [tag_filter_name]}
-            ]
-        )
-
-        instance_ids_to_stop = []
-        
-        # インスタンスIDをリストに追加
-        for reservation in instances['Reservations']:
-            for instance in reservation['Instances']:
-                instance_ids_to_stop.append(instance['InstanceId'])
-
-        # インスタンスを停止
-        if instance_ids_to_stop:
-            ec2_client.stop_instances(InstanceIds=instance_ids_to_stop)
-            return f'Successfully stopped instances: {instance_ids_to_stop}'
+        # 削除リクエストの応答を確認
+        if 'DBCluster' in response and response['DBCluster']['Status'] == 'deleting':
+            return f'RDS cluster {cluster_identifier} deletion request accepted.'
         else:
-            return 'No instances found with the specified tag filter name.'
+            return f'Failed to initiate deletion of RDS cluster {cluster_identifier}.'
     except Exception as e:
         return f'Error: {str(e)}'
-
-def lambda_handler(event, context):
-    # CodeDeployデプロイメントグループ名を指定
-    deployment_group_name = 'YOUR_DEPLOYMENT_GROUP_NAME'
-
-    result = stop_instances_by_codedeploy_tag(deployment_group_name)
-    
-    return {
-        'statusCode': 200,
-        'body': result
-    }

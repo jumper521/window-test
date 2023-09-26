@@ -1,35 +1,55 @@
 import boto3
+import time
 
-def lambda_handler(event, context):
-    # 新しいRDSクラスターの識別子を指定
-    cluster_identifier = 'YOUR_NEW_RDS_CLUSTER_IDENTIFIER'
-
-    # スナップショットの識別子を指定
-    snapshot_identifier = 'YOUR_RDS_SNAPSHOT_IDENTIFIER'
-
-    # RDSクライアントを作成
-    rds_client = boto3.client('rds')
+def stop_instances_by_codedeploy_tag(deployment_group_name):
+    ec2_client = boto3.client('ec2')
+    codedeploy_client = boto3.client('codedeploy')
 
     try:
-        # RDSクラスターをスナップショットから復元
-        response = rds_client.restore_db_cluster_from_snapshot(
-            DBClusterIdentifier=cluster_identifier,
-            SnapshotIdentifier=snapshot_identifier,
-            Engine='aurora-postgresql',  # PostgreSQLエンジンを指定
-            EngineVersion='12.5',  # PostgreSQLエンジンのバージョンを指定
-            AvailabilityZones=['us-east-1a', 'us-east-1b'],  # 利用可能なゾーンを指定
-            DBSubnetGroupName='default',  # サブネットグループ名を指定
-            VpcSecurityGroupIds=['security-group-id-1', 'security-group-id-2'],  # セキュリティグループIDを指定
-            Port=5432,  # PostgreSQLデータベースのポート番号を指定
-            MasterUsername='your-master-username',  # マスターユーザー名を指定
-            MasterUserPassword='your-master-password',  # マスターパスワードを指定
-            ScalingConfiguration={'MinCapacity': 2}  # クラスターのスケーリング設定を指定
+        # CodeDeployデプロイメントグループからタグフィルタ名を取得
+        response = codedeploy_client.get_deployment_group(
+            applicationName='YOUR_APPLICATION_NAME',
+            deploymentGroupName=deployment_group_name
         )
 
-        # 復元リクエストの応答を確認
-        if 'DBCluster' in response and response['DBCluster']['Status'] == 'creating':
-            return f'RDS cluster {cluster_identifier} creation request accepted.'
+        # タグフィルタ名を取得
+        tag_filter_name = response['deploymentGroupInfo']['ec2TagFilters'][0]['Value']
+
+        # タグフィルタ名から関連するEC2インスタンスを取得
+        instances = ec2_client.describe_instances(
+            Filters=[
+                {'Name': f'tag:{tag_filter_name}', 'Values': [tag_filter_name]}
+            ]
+        )
+
+        instance_ids_to_stop = []
+        
+        # インスタンスIDをリストに追加
+        for reservation in instances['Reservations']:
+            for instance in reservation['Instances']:
+                instance_ids_to_stop.append(instance['InstanceId'])
+
+        # インスタンスを停止
+        if instance_ids_to_stop:
+            ec2_client.stop_instances(InstanceIds=instance_ids_to_stop)
+            
+            # インスタンスがすべて stopped になるまで待つ
+            for instance_id in instance_ids_to_stop:
+                ec2_client.get_waiter('instance_stopped').wait(InstanceIds=[instance_id])
+
+            return f'Successfully stopped instances: {instance_ids_to_stop}'
         else:
-            return f'Failed to initiate creation of RDS cluster {cluster_identifier}.'
+            return 'No instances found with the specified tag filter name.'
     except Exception as e:
         return f'Error: {str(e)}'
+
+def lambda_handler(event, context):
+    # CodeDeployデプロイメントグループ名を指定
+    deployment_group_name = 'YOUR_DEPLOYMENT_GROUP_NAME'
+
+    result = stop_instances_by_codedeploy_tag(deployment_group_name)
+    
+    return {
+        'statusCode': 200,
+        'body': result
+    }

@@ -1,47 +1,44 @@
-import psycopg2
-import os
+import boto3
 
 def lambda_handler(event, context):
-    # RDS PostgreSQL 接続情報
-    db_host = 'your-db-hostname'
-    db_port = 'your-db-port'
-    db_name = 'your-db-name'
-    db_user = 'your-db-username'
-    db_password = 'your-db-password'
+    # AWS リージョンを指定
+    aws_region = 'your-aws-region'
 
-    # PostgreSQL データベース接続
-    try:
-        conn = psycopg2.connect(
-            host=db_host,
-            port=db_port,
-            dbname=db_name,
-            user=db_user,
-            password=db_password
-        )
-        print("Connected to PostgreSQL")
-
-        # ALTER コマンドを含む SQL クエリ
-        alter_queries = [
-            "ALTER TABLE your_table_name ADD COLUMN new_column_name INT;",
-            "ALTER TABLE your_table_name DROP COLUMN column_to_drop_name;",
-            # 他の ALTER コマンドを追加
-        ]
-
-        # ALTER コマンドを実行
-        with conn.cursor() as cursor:
-            for query in alter_queries:
-                cursor.execute(query)
-                conn.commit()
-                print(f"Executed ALTER query: {query}")
-
-        conn.close()
-        return {
-            'statusCode': 200,
-            'body': 'ALTER commands executed successfully!'
+    # 削除するロググループとサブスクリプションの情報を指定
+    log_groups = [
+        {
+            'logGroupName': 'log-group-1',
+            'subscriptionFilterName': 'subscription-filter-1'
+        },
+        {
+            'logGroupName': 'log-group-2',
+            'subscriptionFilterName': 'subscription-filter-2'
+        },
+        {
+            'logGroupName': 'log-group-3',
+            'subscriptionFilterName': 'subscription-filter-3'
         }
-    except Exception as e:
-        print(f"Error: {str(e)}")
-        return {
-            'statusCode': 500,
-            'body': f'Error: {str(e)}'
-        }
+    ]
+
+    # CloudWatch Logs クライアントの初期化
+    logs_client = boto3.client('logs', region_name=aws_region)
+
+    for log_group_info in log_groups:
+        log_group_name = log_group_info['logGroupName']
+        subscription_filter_name = log_group_info['subscriptionFilterName']
+
+        try:
+            # サブスクリプションフィルタを削除
+            logs_client.delete_subscription_filter(
+                logGroupName=log_group_name,
+                filterName=subscription_filter_name
+            )
+            print(f"Subscription filter '{subscription_filter_name}' deleted from log group '{log_group_name}'")
+
+        except Exception as e:
+            print(f"Error deleting subscription filter '{subscription_filter_name}' from log group '{log_group_name}': {str(e)}")
+
+    return {
+        'statusCode': 200,
+        'body': 'Subscription filters deleted successfully!'
+    }

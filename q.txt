@@ -1,31 +1,47 @@
-import boto3
-import time
-
-# AWS リージョンと RDS クラスターの名前を指定
-aws_region = 'YourAWSRegion'
-cluster_identifier = 'YourRDSClusterIdentifier'
-
-# Boto3 RDS クライアントを作成
-rds_client = boto3.client('rds', region_name=aws_region)
-
-def check_cluster_status(cluster_identifier):
-    while True:
-        # RDS クラスターの現在の状態を取得
-        response = rds_client.describe_db_clusters(DBClusterIdentifier=cluster_identifier)
-        cluster_status = response['DBClusters'][0]['Status']
-
-        if cluster_status == 'available':
-            print('RDS Cluster is running and available.')
-            break
-
-        print(f'RDS Cluster status: {cluster_status}. Waiting for it to become available...')
-        time.sleep(30)  # 30秒ごとに確認
+import psycopg2
+import os
 
 def lambda_handler(event, context):
-    # RDS クラスターの状態を確認
-    check_cluster_status(cluster_identifier)
+    # RDS PostgreSQL 接続情報
+    db_host = 'your-db-hostname'
+    db_port = 'your-db-port'
+    db_name = 'your-db-name'
+    db_user = 'your-db-username'
+    db_password = 'your-db-password'
 
-    return {
-        'statusCode': 200,
-        'body': 'Lambda function executed successfully!'
-    }
+    # PostgreSQL データベース接続
+    try:
+        conn = psycopg2.connect(
+            host=db_host,
+            port=db_port,
+            dbname=db_name,
+            user=db_user,
+            password=db_password
+        )
+        print("Connected to PostgreSQL")
+
+        # ALTER コマンドを含む SQL クエリ
+        alter_queries = [
+            "ALTER TABLE your_table_name ADD COLUMN new_column_name INT;",
+            "ALTER TABLE your_table_name DROP COLUMN column_to_drop_name;",
+            # 他の ALTER コマンドを追加
+        ]
+
+        # ALTER コマンドを実行
+        with conn.cursor() as cursor:
+            for query in alter_queries:
+                cursor.execute(query)
+                conn.commit()
+                print(f"Executed ALTER query: {query}")
+
+        conn.close()
+        return {
+            'statusCode': 200,
+            'body': 'ALTER commands executed successfully!'
+        }
+    except Exception as e:
+        print(f"Error: {str(e)}")
+        return {
+            'statusCode': 500,
+            'body': f'Error: {str(e)}'
+        }

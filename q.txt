@@ -1,37 +1,30 @@
 import boto3
 import time
 
-# ターゲットグループ名とリージョンを指定
-target_group_name = 'YourTargetGroupName'
-region = 'YourRegion'
+# AWS リージョンと RDS クラスターの名前を指定
+aws_region = 'YourAWSRegion'
+cluster_identifier = 'YourRDSClusterIdentifier'
 
-# Boto3 クライアントを作成
-elbv2_client = boto3.client('elbv2', region_name=region)
+# Boto3 RDS クライアントを作成
+rds_client = boto3.client('rds', region_name=aws_region)
 
-def check_target_health(target_group_arn):
+def check_cluster_status(cluster_identifier):
     while True:
-        # ターゲットグループのヘルスチェックを取得
-        response = elbv2_client.describe_target_health(TargetGroupArn=target_group_arn)
-        
-        # ターゲットのヘルスステータスを確認
-        target_health = response['TargetHealthDescriptions'][0]
-        target_state = target_health['TargetHealth']['State']
-        
-        if target_state == 'healthy':
-            print('Target is healthy.')
+        # RDS クラスターの現在の状態を取得
+        response = rds_client.describe_db_clusters(DBClusterIdentifier=cluster_identifier)
+        cluster_status = response['DBClusters'][0]['Status']
+
+        if cluster_status == 'available':
+            print('RDS Cluster is running and available.')
             break
-        
-        print(f'Target is {target_state}. Waiting for it to become healthy...')
-        time.sleep(10)  # 10秒ごとに確認
+
+        print(f'RDS Cluster status: {cluster_status}. Waiting for it to become available...')
+        time.sleep(30)  # 30秒ごとに確認
 
 def lambda_handler(event, context):
-    # ターゲットグループの ARN を取得
-    response = elbv2_client.describe_target_groups(Names=[target_group_name])
-    target_group_arn = response['TargetGroups'][0]['TargetGroupArn']
-    
-    # ターゲットのヘルスチェックを監視
-    check_target_health(target_group_arn)
-    
+    # RDS クラスターの状態を確認
+    check_cluster_status(cluster_identifier)
+
     return {
         'statusCode': 200,
         'body': 'Lambda function executed successfully!'

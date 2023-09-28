@@ -1,48 +1,60 @@
-import boto3
-
-def create_subscription_filter(log_group_name, filter_name, destination_arn):
-    logs_client = boto3.client('logs')
-
-    try:
-        # サブスクリプションフィルタを作成
-        response = logs_client.put_subscription_filter(
-            logGroupName=log_group_name,
-            filterName=filter_name,
-            filterPattern='',  # フィルターパターンを指定（必要に応じて設定）
-            destinationArn=destination_arn  # ログの送信先を指定
-        )
-
-        return f'Successfully created subscription filter: {filter_name} for log group: {log_group_name}'
-    except Exception as e:
-        return f'Error: {str(e)}'
-
-def lambda_handler(event, context):
-    # サブスクリプションを作成したいロググループの情報を指定
-    log_groups = [
+{
+  "Comment": "RDS Cluster Workflow",
+  "StartAt": "DeleteCluster",
+  "States": {
+    "DeleteCluster": {
+      "Type": "Task",
+      "Resource": "arn:aws:lambda:REGION:ACCOUNT_ID:function:DeleteClusterLambdaFunction",
+      "Next": "RestoreDBFromSnapshot",
+      "Catch": [
         {
-            'logGroupName': 'LOG_GROUP_NAME_1',  # ロググループ名を指定
-            'filterName': 'FILTER_NAME_1',  # サブスクリプションフィルタの名前を指定
-            'destinationArn': 'DESTINATION_ARN_1'  # ログの送信先ARNを指定
-        },
-        {
-            'logGroupName': 'LOG_GROUP_NAME_2',  # 別のロググループ名を指定
-            'filterName': 'FILTER_NAME_2',  # 別のサブスクリプションフィルタの名前を指定
-            'destinationArn': 'DESTINATION_ARN_2'  # 別のログの送信先ARNを指定
+          "ErrorEquals": ["States.ALL"],
+          "Next": "NotifyFailure"
         }
-        # 必要な数だけロググループを追加
-    ]
-
-    results = []
-
-    for log_group_info in log_groups:
-        result = create_subscription_filter(
-            log_group_name=log_group_info['logGroupName'],
-            filter_name=log_group_info['filterName'],
-            destination_arn=log_group_info['destinationArn']
-        )
-        results.append(result)
-
-    return {
-        'statusCode': 200,
-        'body': '\n'.join(results)
+      ]
+    },
+    "RestoreDBFromSnapshot": {
+      "Type": "Task",
+      "Resource": "arn:aws:lambda:REGION:ACCOUNT_ID:function:RestoreDBFromSnapshotLambdaFunction",
+      "Next": "WaitForDBAvailable",
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "Next": "NotifyFailure"
+        }
+      ]
+    },
+    "WaitForDBAvailable": {
+      "Type": "Wait",
+      "Seconds": 60,
+      "Next": "CheckDBStatus"
+    },
+    "CheckDBStatus": {
+      "Type": "Task",
+      "Resource": "arn:aws:lambda:REGION:ACCOUNT_ID:function:CheckDBStatusLambdaFunction",
+      "Next": "InsertRecords",
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "Next": "NotifyFailure"
+        }
+      ]
+    },
+    "InsertRecords": {
+      "Type": "Task",
+      "Resource": "arn:aws:lambda:REGION:ACCOUNT_ID:function:InsertRecordsLambdaFunction",
+      "End": true,
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "Next": "NotifyFailure"
+        }
+      ]
+    },
+    "NotifyFailure": {
+      "Type": "Fail",
+      "Error": "WorkflowFailure",
+      "Cause": "One or more steps failed"
     }
+  }
+}

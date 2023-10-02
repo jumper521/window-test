@@ -1,39 +1,46 @@
+import json
 import psycopg2
 
-# RDSの接続情報を設定します
-host = 'YOUR_RDS_ENDPOINT'
-database = 'YOUR_DATABASE_NAME'
-user = 'YOUR_USERNAME'
-password = 'YOUR_PASSWORD'
+def lambda_handler(event, context):
+    # RDSの接続情報を設定します
+    host = 'YOUR_RDS_ENDPOINT'  # RDSのエンドポイントを指定
+    database = 'YOUR_DATABASE_NAME'  # 接続するデータベース名
+    user = 'YOUR_USERNAME'  # データベースユーザー名
+    password = 'YOUR_PASSWORD'  # データベースパスワード
 
-try:
-    # RDSに接続します
-    connection = psycopg2.connect(
-        host=host,
-        database=database,
-        user=user,
-        password=password
-    )
+    try:
+        # RDSに接続します
+        connection = psycopg2.connect(
+            host=host,
+            database=database,
+            user=user,
+            password=password
+        )
 
-    # カーソルを作成します
-    cursor = connection.cursor()
+        # カーソルを作成します
+        cursor = connection.cursor()
 
-    # SQLクエリを実行します
-    cursor.execute('SHOW DATABASES;')
+        # SQLクエリを実行します
+        cursor.execute('SHOW DATABASES;')
 
-    # 結果を取得します
-    databases = cursor.fetchall()
+        # 結果を取得します
+        databases = cursor.fetchall()
 
-    # 結果を表示します
-    for db in databases:
-        print(db[0])
+        # 結果をリストに変換します
+        database_list = [db[0] for db in databases]
 
-    # カーソルと接続を閉じます
-    cursor.close()
-    connection.close()
-
-except psycopg2.Error as error:
-    print('データベースエラー:', error)
-finally:
-    if connection:
+        # カーソルと接続を閉じます
+        cursor.close()
         connection.close()
+
+        # 結果を返します
+        return {
+            "statusCode": 200,
+            "body": json.dumps(database_list)
+        }
+
+    except Exception as e:
+        return {
+            "statusCode": 500,
+            "body": str(e)
+        }

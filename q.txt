@@ -1,60 +1,39 @@
-{
-  "Comment": "RDS Cluster Workflow",
-  "StartAt": "DeleteCluster",
-  "States": {
-    "DeleteCluster": {
-      "Type": "Task",
-      "Resource": "arn:aws:lambda:REGION:ACCOUNT_ID:function:DeleteClusterLambdaFunction",
-      "Next": "RestoreDBFromSnapshot",
-      "Catch": [
-        {
-          "ErrorEquals": ["States.ALL"],
-          "Next": "NotifyFailure"
-        }
-      ]
-    },
-    "RestoreDBFromSnapshot": {
-      "Type": "Task",
-      "Resource": "arn:aws:lambda:REGION:ACCOUNT_ID:function:RestoreDBFromSnapshotLambdaFunction",
-      "Next": "WaitForDBAvailable",
-      "Catch": [
-        {
-          "ErrorEquals": ["States.ALL"],
-          "Next": "NotifyFailure"
-        }
-      ]
-    },
-    "WaitForDBAvailable": {
-      "Type": "Wait",
-      "Seconds": 60,
-      "Next": "CheckDBStatus"
-    },
-    "CheckDBStatus": {
-      "Type": "Task",
-      "Resource": "arn:aws:lambda:REGION:ACCOUNT_ID:function:CheckDBStatusLambdaFunction",
-      "Next": "InsertRecords",
-      "Catch": [
-        {
-          "ErrorEquals": ["States.ALL"],
-          "Next": "NotifyFailure"
-        }
-      ]
-    },
-    "InsertRecords": {
-      "Type": "Task",
-      "Resource": "arn:aws:lambda:REGION:ACCOUNT_ID:function:InsertRecordsLambdaFunction",
-      "End": true,
-      "Catch": [
-        {
-          "ErrorEquals": ["States.ALL"],
-          "Next": "NotifyFailure"
-        }
-      ]
-    },
-    "NotifyFailure": {
-      "Type": "Fail",
-      "Error": "WorkflowFailure",
-      "Cause": "One or more steps failed"
-    }
-  }
-}
+import psycopg2
+
+# RDSの接続情報を設定します
+host = 'YOUR_RDS_ENDPOINT'
+database = 'YOUR_DATABASE_NAME'
+user = 'YOUR_USERNAME'
+password = 'YOUR_PASSWORD'
+
+try:
+    # RDSに接続します
+    connection = psycopg2.connect(
+        host=host,
+        database=database,
+        user=user,
+        password=password
+    )
+
+    # カーソルを作成します
+    cursor = connection.cursor()
+
+    # SQLクエリを実行します
+    cursor.execute('SHOW DATABASES;')
+
+    # 結果を取得します
+    databases = cursor.fetchall()
+
+    # 結果を表示します
+    for db in databases:
+        print(db[0])
+
+    # カーソルと接続を閉じます
+    cursor.close()
+    connection.close()
+
+except psycopg2.Error as error:
+    print('データベースエラー:', error)
+finally:
+    if connection:
+        connection.close()

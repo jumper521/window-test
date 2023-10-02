@@ -1,4 +1,3 @@
-import json
 import psycopg2
 
 def lambda_handler(event, context):
@@ -17,29 +16,14 @@ def lambda_handler(event, context):
             password=password
         )
 
-        # カーソルを作成します
-        cursor = connection.cursor()
-
-        # SQLクエリを実行します
-        cursor.execute('SHOW DATABASES;')
-
-        # 結果を取得します
-        databases = cursor.fetchall()
-
-        # 結果をリストに変換します
-        database_list = [db[0] for db in databases]
-
-        # カーソルと接続を閉じます
-        cursor.close()
-        connection.close()
-
-        # 結果を返します
+        # 接続が成功した場合、成功メッセージを返します
         return {
             "statusCode": 200,
-            "body": json.dumps(database_list)
+            "body": "RDSに正常に接続しました"
         }
 
     except Exception as e:
+        # 接続が失敗した場合、エラーメッセージを返します
         return {
             "statusCode": 500,
             "body": str(e)

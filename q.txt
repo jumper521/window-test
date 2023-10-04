@@ -1,45 +1,50 @@
 import boto3
 
 def lambda_handler(event, context):
-    # スナップショットの識別子と復元後のDBクラスター識別子を指定します
-    snapshot_identifier = 'YOUR_RDS_SNAPSHOT_IDENTIFIER'
-    restored_cluster_identifier = 'NEW_RDS_CLUSTER_IDENTIFIER'
+    # 削除対象のRDSクラスターとライターインスタンスの識別子を指定します
+    cluster_identifier = 'deleteme-writer-only'
+    writer_instance_identifier = 'instance-2130'
 
     # AWSリージョンを指定します
-    region = 'us-east-1'  # クラスターを復元するリージョンに合わせて変更してください
+    region = 'us-east-1'  # クラスターが存在するリージョンに合わせて変更してください
 
     # Boto3のRDSクラスタークライアントを作成します
     rds_client = boto3.client('rds', region_name=region)
 
     try:
-        # スナップショットからDBクラスターを復元します
-        response = rds_client.restore_db_cluster_from_snapshot(
-            DBClusterIdentifier=restored_cluster_identifier,
-            SnapshotIdentifier=snapshot_identifier,
-            Engine='aurora',  # エンジンに合わせて変更
-            EngineVersion='5.6.10a',  # エンジンバージョンに合わせて変更
-            DBSubnetGroupName='default',
-            VpcSecurityGroupIds=[
-                'YOUR_SECURITY_GROUP_ID',
-            ],
-            AvailabilityZones=[
-                'us-east-1a',  # 利用可能なゾーンに合わせて変更
-            ],
-            Port=3306,  # ポート番号に合わせて変更
-            MasterUsername='YOUR_MASTER_USERNAME',
-            MasterUserPassword='YOUR_MASTER_PASSWORD',
-            PreferredBackupWindow='07:00-09:00',  # 好みに合わせて変更
-            PreferredMaintenanceWindow='sun:05:00-sun:06:00',  # 好みに合わせて変更
+        # ライターインスタンスを削除します
+        response = rds_client.delete_db_instance(
+            DBInstanceIdentifier=writer_instance_identifier
         )
 
-        # 復元が正常に完了した場合
-        return {
-            'statusCode': 200,
-            'body': f"DBクラスター {restored_cluster_identifier} をスナップショット {snapshot_identifier} から復元しました。"
-        }
+        # ライターインスタンスの削除が正常に完了した場合
+        if response['DBInstance']['DBInstanceStatus'] == 'deleting':
+            # クラスターを削除します
+            response = rds_client.delete_db_cluster(
+                DBClusterIdentifier=cluster_identifier,
+                SkipFinalSnapshot=True,
+                DeleteAutomatedBackups=True
+            )
+
+            # クラスターの削除が正常に完了した場合
+            if response['DBCluster']['Status'] == 'available':
+                return {
+                    'statusCode': 200,
+                    'body': f"RDSクラスター {cluster_identifier} とライターインスタンス {writer_instance_identifier} を削除しました。"
+                }
+            else:
+                return {
+                    'statusCode': 500,
+                    'body': f"RDSクラスターの削除中にエラーが発生しました: {response['DBCluster']['Status']}"
+                }
+        else:
+            return {
+                'statusCode': 500,
+                'body': f"ライターインスタンス {writer_instance_identifier} の削除中にエラーが発生しました: {response['DBInstance']['DBInstanceStatus']}"
+            }
     except Exception as e:
         # エラーメッセージを返します
         return {
             'statusCode': 500,
-            'body': f"DBクラスターの復元中にエラーが発生しました: {str(e)}"
+            'body': f"削除中にエラーが発生しました: {str(e)}"
         }

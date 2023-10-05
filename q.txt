@@ -1,30 +1,35 @@
 import boto3
+import os
 
 def lambda_handler(event, context):
-    # RDSクラスターの識別子を指定します
-    rds_cluster_identifier = 'YOUR_RDS_CLUSTER_IDENTIFIER'
+    # AWS Lambdaから提供されるIAMロールのアクセスキーとシークレットアクセスキーを使用
+    rds_client = boto3.client('rds')
 
-    # AWSリージョンを指定します
-    region = 'us-east-1'  # クラスターが存在するリージョンに合わせて変更してください
+    # RDSインスタンスとRDSクラスターの識別子を設定
+    instance_identifier = 'YOUR_INSTANCE_IDENTIFIER'
+    cluster_identifier = 'YOUR_CLUSTER_IDENTIFIER'
 
-    # Boto3のRDSクラスタークライアントを作成します
-    rds_client = boto3.client('rds', region_name=region)
-
+    # RDSインスタンスの削除
     try:
-        # RDSクラスターを削除します
-        response = rds_client.delete_db_cluster(
-            DBClusterIdentifier=rds_cluster_identifier,
-            SkipFinalSnapshot=True  # 最終スナップショットを作成しない場合はTrueに設定
+        rds_client.delete_db_instance(
+            DBInstanceIdentifier=instance_identifier,
+            SkipFinalSnapshot=True
         )
-
-        # 削除が正常に完了した場合
-        return {
-            'statusCode': 200,
-            'body': f"RDSクラスター {rds_cluster_identifier} の削除が正常に完了しました。"
-        }
+        print(f"RDSインスタンス {instance_identifier} の削除が完了しました。")
     except Exception as e:
-        # エラーメッセージを返します
-        return {
-            'statusCode': 500,
-            'body': f"RDSクラスター {rds_cluster_identifier} の削除中にエラーが発生しました: {str(e)}"
-        }
+        print(f"RDSインスタンス {instance_identifier} の削除中にエラーが発生しました: {e}")
+
+    # RDSクラスターの削除
+    try:
+        rds_client.delete_db_cluster(
+            DBClusterIdentifier=cluster_identifier,
+            SkipFinalSnapshot=True
+        )
+        print(f"RDSクラスター {cluster_identifier} の削除が完了しました。")
+    except Exception as e:
+        print(f"RDSクラスター {cluster_identifier} の削除中にエラーが発生しました: {e}")
+
+    return {
+        'statusCode': 200,
+        'body': 'RDSインスタンスとRDSクラスターの削除が完了しました。'
+    }

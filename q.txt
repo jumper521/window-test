@@ -1,35 +1,28 @@
 import boto3
-import os
+
+def check_rds_cluster_status(cluster_identifier):
+    rds_client = boto3.client('rds')
+    
+    try:
+        response = rds_client.describe_db_clusters(DBClusterIdentifier=cluster_identifier)
+        if len(response['DBClusters']) == 0:
+            return False  # クラスターが存在しない場合はFalseを返す
+        return True  # クラスターが存在する場合はTrueを返す
+    except Exception as e:
+        return False
 
 def lambda_handler(event, context):
-    # AWS Lambdaから提供されるIAMロールのアクセスキーとシークレットアクセスキーを使用
-    rds_client = boto3.client('rds')
-
-    # RDSインスタンスとRDSクラスターの識別子を設定
-    instance_identifier = 'YOUR_INSTANCE_IDENTIFIER'
     cluster_identifier = 'YOUR_CLUSTER_IDENTIFIER'
 
-    # RDSインスタンスの削除
-    try:
-        rds_client.delete_db_instance(
-            DBInstanceIdentifier=instance_identifier,
-            SkipFinalSnapshot=True
-        )
-        print(f"RDSインスタンス {instance_identifier} の削除が完了しました。")
-    except Exception as e:
-        print(f"RDSインスタンス {instance_identifier} の削除中にエラーが発生しました: {e}")
-
-    # RDSクラスターの削除
-    try:
-        rds_client.delete_db_cluster(
-            DBClusterIdentifier=cluster_identifier,
-            SkipFinalSnapshot=True
-        )
-        print(f"RDSクラスター {cluster_identifier} の削除が完了しました。")
-    except Exception as e:
-        print(f"RDSクラスター {cluster_identifier} の削除中にエラーが発生しました: {e}")
-
-    return {
-        'statusCode': 200,
-        'body': 'RDSインスタンスとRDSクラスターの削除が完了しました。'
-    }
+    if not check_rds_cluster_status(cluster_identifier):
+        # クラスターが存在しない場合、HTTP 200を返して終了
+        return {
+            'statusCode': 200,
+            'body': 'RDSクラスターは存在しません。'
+        }
+    else:
+        # クラスターが存在する場合、HTTP 500を返して終了
+        return {
+            'statusCode': 500,
+            'body': f'RDSクラスター {cluster_identifier} は存在します。'
+        }

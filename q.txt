@@ -6,23 +6,40 @@ def check_rds_cluster_status(cluster_identifier):
     try:
         response = rds_client.describe_db_clusters(DBClusterIdentifier=cluster_identifier)
         if len(response['DBClusters']) == 0:
-            return False  # クラスターが存在しない場合はFalseを返す
-        return True  # クラスターが存在する場合はTrueを返す
+            return None  # クラスターが存在しない場合はNoneを返す
+        cluster_status = response['DBClusters'][0]['Status']
+        return cluster_status
     except Exception as e:
-        return False
+        return str(e)
+
+def check_rds_instance_status(instance_identifier):
+    rds_client = boto3.client('rds')
+    
+    try:
+        response = rds_client.describe_db_instances(DBInstanceIdentifier=instance_identifier)
+        if len(response['DBInstances']) == 0:
+            return None  # インスタンスが存在しない場合はNoneを返す
+        instance_status = response['DBInstances'][0]['DBInstanceStatus']
+        return instance_status
+    except Exception as e:
+        return str(e)
 
 def lambda_handler(event, context):
     cluster_identifier = 'YOUR_CLUSTER_IDENTIFIER'
+    instance_identifier = 'YOUR_INSTANCE_IDENTIFIER'
 
-    if not check_rds_cluster_status(cluster_identifier):
-        # クラスターが存在しない場合、HTTP 200を返して終了
+    cluster_status = check_rds_cluster_status(cluster_identifier)
+    instance_status = check_rds_instance_status(instance_identifier)
+
+    if cluster_status == 'available' and instance_status == 'available':
+        # クラスターとインスタンスが両方とも利用可能な場合、HTTP 200を返して終了
         return {
             'statusCode': 200,
-            'body': 'RDSクラスターは存在しません。'
+            'body': f'RDSクラスター {cluster_identifier} およびRDSインスタンス {instance_identifier} は利用可能です。'
         }
     else:
-        # クラスターが存在する場合、HTTP 500を返して終了
+        # クラスターまたはインスタンスのどちらかが利用可能でない場合、HTTP 500を返して終了
         return {
             'statusCode': 500,
-            'body': f'RDSクラスター {cluster_identifier} は存在します。'
+            'body': f'RDSクラスター {cluster_identifier} またはRDSインスタンス {instance_identifier} の状態が利用可能ではありません。'
         }

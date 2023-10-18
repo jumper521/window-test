@@ -33,9 +33,24 @@ def lambda_handler(event, context):
         )
 
         # 復元が正常に完了した場合
+        # 新しいRDSインスタンスを作成
+        rds_instance_identifier = 'NEW_RDS_INSTANCE_IDENTIFIER'
+        response = rds_client.create_db_instance(
+            DBInstanceIdentifier=rds_instance_identifier,
+            DBInstanceClass='db.t2.micro',  # インスタンスタイプを指定
+            Engine='aurora',
+            DBParameterGroupName='default.aurora-mysql5.7',
+            DBSubnetGroupName='default',
+            VpcSecurityGroupIds=[
+                'YOUR_SECURITY_GROUP_ID',
+            ],
+            MasterUsername='YOUR_MASTER_USERNAME',
+            MasterUserPassword='YOUR_MASTER_PASSWORD',
+        )
+
         return {
             'statusCode': 200,
-            'body': f"DBクラスター {restored_cluster_identifier} をスナップショット {snapshot_identifier} から復元しました。"
+            'body': f"DBクラスター {restored_cluster_identifier} をスナップショット {snapshot_identifier} から復元し、新しいRDSインスタンス {rds_instance_identifier} を作成しました。"
         }
     except Exception as e:
         # エラーメッセージを返します

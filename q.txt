@@ -1,12 +1,55 @@
-#!/bin/bash
+import boto3
+import time
 
-# プロセスを確認するコマンド
-process_cmd="/bin/bash /nuro/daemon/test.sh"
+def wait_for_snapshot_completion(rds_client, snapshot_identifier):
+    while True:
+        snapshot = rds_client.describe_db_cluster_snapshots(
+            DBClusterSnapshotIdentifier=snapshot_identifier
+        )
+        snapshot_status = snapshot['DBClusterSnapshots'][0]['Status']
+        
+        if snapshot_status == 'available':
+            break
+        
+        time.sleep(60)  # 60秒ごとにポーリング
 
-# プロセスをpsコマンドで検索し、grepプロセスを除外
-# プロセスが見つかれば0を返し、見つからなければ1を返す
-if ps aux | grep -v grep | grep -q "$process_cmd"; then
-    exit 0
-else
-    exit 1
-fi
+def lambda_handler(event, context):
+    # RDSクラスターの識別子を設定
+    cluster_identifier = 'YOUR_CLUSTER_IDENTIFIER'
+    
+    # スナップショットの識別子を設定
+    snapshot_identifier = 'YOUR_SNAPSHOT_IDENTIFIER'
+    
+    # AWSリージョンを指定
+    region = 'us-east-1'  # クラスターを削除するリージョンに合わせて変更
+    
+    # Boto3のRDSクラスタークライアントを作成
+    rds_client = boto3.client('rds', region_name=region)
+
+    try:
+        # RDSクラスターからスナップショットを作成
+        rds_client.create_db_cluster_snapshot(
+            DBClusterSnapshotIdentifier=snapshot_identifier,
+            DBClusterIdentifier=cluster_identifier
+        )
+        
+        # スナップショットが "Available" になるまで待つ
+        wait_for_snapshot_completion(rds_client, snapshot_identifier)
+        
+        # RDSクラスターを削除
+        rds_client.delete_db_cluster(
+            DBClusterIdentifier=cluster_identifier,
+            SkipFinalSnapshot=False,
+            FinalDBSnapshotIdentifier=snapshot_identifier  # 最終スナップショットを指定
+        )
+
+        return {
+            'statusCode': 200,
+            'body': f"RDSクラスター {cluster_identifier} をスナップショット {snapshot_identifier} を作成し、クラスターを削除しました。"
+        }
+    except Exception as e:
+        # エラーメッセージを返します
+        return {
+            'statusCode': 500,
+            'body': f"RDSクラスターの削除中にエラーが発生しました: {str(e)}"
+        }

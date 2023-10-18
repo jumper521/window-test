@@ -1,0 +1,45 @@
+import boto3
+
+def lambda_handler(event, context):
+    # スナップショットの識別子と復元後のDBクラスター識別子を指定します
+    snapshot_identifier = 'YOUR_RDS_SNAPSHOT_IDENTIFIER'
+    restored_cluster_identifier = 'NEW_RDS_CLUSTER_IDENTIFIER'
+
+    # AWSリージョンを指定します
+    region = 'us-east-1'  # クラスターを復元するリージョンに合わせて変更してください
+
+    # Boto3のRDSクラスタークライアントを作成します
+    rds_client = boto3.client('rds', region_name=region)
+
+    try:
+        # スナップショットからDBクラスターを復元します
+        response = rds_client.restore_db_cluster_from_snapshot(
+            DBClusterIdentifier=restored_cluster_identifier,
+            SnapshotIdentifier=snapshot_identifier,
+            Engine='aurora',  # エンジンに合わせて変更
+            EngineVersion='5.6.10a',  # エンジンバージョンに合わせて変更
+            DBSubnetGroupName='default',
+            VpcSecurityGroupIds=[
+                'YOUR_SECURITY_GROUP_ID',
+            ],
+            AvailabilityZones=[
+                'us-east-1a',  # 利用可能なゾーンに合わせて変更
+            ],
+            Port=3306,  # ポート番号に合わせて変更
+            MasterUsername='YOUR_MASTER_USERNAME',
+            MasterUserPassword='YOUR_MASTER_PASSWORD',
+            PreferredBackupWindow='07:00-09:00',  # 好みに合わせて変更
+            PreferredMaintenanceWindow='sun:05:00-sun:06:00',  # 好みに合わせて変更
+        )
+
+        # 復元が正常に完了した場合
+        return {
+            'statusCode': 200,
+            'body': f"DBクラスター {restored_cluster_identifier} をスナップショット {snapshot_identifier} から復元しました。"
+        }
+    except Exception as e:
+        # エラーメッセージを返します
+        return {
+            'statusCode': 500,
+            'body': f"DBクラスターの復元中にエラーが発生しました: {str(e)}"
+        }

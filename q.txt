@@ -1,55 +1,43 @@
-import boto3
 import time
-
-def wait_for_snapshot_completion(rds_client, snapshot_identifier):
-    while True:
-        snapshot = rds_client.describe_db_cluster_snapshots(
-            DBClusterSnapshotIdentifier=snapshot_identifier
-        )
-        snapshot_status = snapshot['DBClusterSnapshots'][0]['Status']
-        
-        if snapshot_status == 'available':
-            break
-        
-        time.sleep(60)  # 60秒ごとにポーリング
+import boto3
 
 def lambda_handler(event, context):
-    # RDSクラスターの識別子を設定
-    cluster_identifier = 'YOUR_CLUSTER_IDENTIFIER'
-    
-    # スナップショットの識別子を設定
-    snapshot_identifier = 'YOUR_SNAPSHOT_IDENTIFIER'
-    
-    # AWSリージョンを指定
-    region = 'us-east-1'  # クラスターを削除するリージョンに合わせて変更
-    
-    # Boto3のRDSクラスタークライアントを作成
-    rds_client = boto3.client('rds', region_name=region)
-
     try:
-        # RDSクラスターからスナップショットを作成
-        rds_client.create_db_cluster_snapshot(
-            DBClusterSnapshotIdentifier=snapshot_identifier,
-            DBClusterIdentifier=cluster_identifier
-        )
-        
-        # スナップショットが "Available" になるまで待つ
-        wait_for_snapshot_completion(rds_client, snapshot_identifier)
-        
-        # RDSクラスターを削除
-        rds_client.delete_db_cluster(
-            DBClusterIdentifier=cluster_identifier,
-            SkipFinalSnapshot=False,
-            FinalDBSnapshotIdentifier=snapshot_identifier  # 最終スナップショットを指定
-        )
+        # AWS認証情報はLambda関数のIAMロールから取得されます
+        rds_client = boto3.client('rds')
 
-        return {
-            'statusCode': 200,
-            'body': f"RDSクラスター {cluster_identifier} をスナップショット {snapshot_identifier} を作成し、クラスターを削除しました。"
-        }
+        # スナップショットの識別子とクラスター識別子を設定
+        snapshot_identifier = 'test-snapshot'  # スナップショットの識別子
+        cluster_identifier = 'test-cluster'    # DBクラスターの識別子
+
+        # 既存のスナップショットを確認
+        snapshots = rds_client.describe_db_cluster_snapshots(DBClusterIdentifier=cluster_identifier)
+        for snapshot in snapshots['DBClusterSnapshots']:
+            if snapshot['DBClusterSnapshotIdentifier'] == snapshot_identifier:
+                # 既存のスナップショットを削除
+                rds_client.delete_db_cluster_snapshot(DBClusterSnapshotIdentifier=snapshot_identifier)
+                # 削除が完了するまで待機
+                while True:
+                    snapshot = rds_client.describe_db_cluster_snapshots(DBClusterSnapshotIdentifier=snapshot_identifier)
+                    if len(snapshot['DBClusterSnapshots']) == 0:
+                        break
+                    time.sleep(30)
+                break
+
+        # 新しいスナップショットを作成
+        rds_client.create_db_cluster_snapshot(DBClusterSnapshotIdentifier=snapshot_identifier, DBClusterIdentifier=cluster_identifier)
+
+        # スナップショットが利用可能になるのを待つ
+        while True:
+            snapshot = rds_client.describe_db_cluster_snapshots(DBClusterSnapshotIdentifier=snapshot_identifier)
+            if len(snapshot['DBClusterSnapshots']) > 0:
+                snapshot_status = snapshot['DBClusterSnapshots'][0]['Status']
+                if snapshot_status == 'available':
+                    break
+            time.sleep(30)
+
+        print(f"スナップショット '{snapshot_identifier}' が利用可能になりました")
     except Exception as e:
-        # エラーメッセージを返します
         return {
-            'statusCode': 500,
-            'body': f"RDSクラスターの削除中にエラーが発生しました: {str(e)}"
+            'statusCode': 500
         }

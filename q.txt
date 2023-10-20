@@ -12,17 +12,23 @@ def lambda_handler(event, context):
 
         # 既存のスナップショットを確認
         snapshots = rds_client.describe_db_cluster_snapshots(DBClusterIdentifier=cluster_identifier)
+        snapshot_exists = False
+
         for snapshot in snapshots['DBClusterSnapshots']:
             if snapshot['DBClusterSnapshotIdentifier'] == snapshot_identifier:
-                # 既存のスナップショットを削除
-                rds_client.delete_db_cluster_snapshot(DBClusterSnapshotIdentifier=snapshot_identifier)
-                # 削除が完了するまで待機
-                while True:
-                    snapshot = rds_client.describe_db_cluster_snapshots(DBClusterSnapshotIdentifier=snapshot_identifier)
-                    if len(snapshot['DBClusterSnapshots']) == 0:
-                        break
-                    time.sleep(30)
+                snapshot_exists = True
                 break
+
+        # スナップショットが存在する場合、削除
+        if snapshot_exists:
+            rds_client.delete_db_cluster_snapshot(DBClusterSnapshotIdentifier=snapshot_identifier)
+
+            # 削除が完了するまで待機
+            while True:
+                snapshot = rds_client.describe_db_cluster_snapshots(DBClusterSnapshotIdentifier=snapshot_identifier)
+                if len(snapshot['DBClusterSnapshots']) == 0:
+                    break
+                time.sleep(30)
 
         # 新しいスナップショットを作成
         rds_client.create_db_cluster_snapshot(DBClusterSnapshotIdentifier=snapshot_identifier, DBClusterIdentifier=cluster_identifier)

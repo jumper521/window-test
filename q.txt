@@ -10,7 +10,7 @@ def lambda_handler(event, context):
         snapshot_identifier = 'test-snapshot'  # スナップショットの識別子
         cluster_identifier = 'test-cluster'    # DBクラスターの識別子
 
-        # 既存のスナップショットを確認
+        # スナップショットの存在を確認
         snapshots = rds_client.describe_db_cluster_snapshots(DBClusterIdentifier=cluster_identifier)
         snapshot_exists = False
 
@@ -25,8 +25,11 @@ def lambda_handler(event, context):
 
             # 削除が完了するまで待機
             while True:
-                snapshot = rds_client.describe_db_cluster_snapshots(DBClusterSnapshotIdentifier=snapshot_identifier)
-                if len(snapshot['DBClusterSnapshots']) == 0:
+                try:
+                    snapshot = rds_client.describe_db_cluster_snapshots(DBClusterSnapshotIdentifier=snapshot_identifier)
+                    if len(snapshot['DBClusterSnapshots']) == 0:
+                        break
+                except rds_client.exceptions.DBClusterSnapshotNotFoundFault:
                     break
                 time.sleep(30)
 

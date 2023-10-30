@@ -1,29 +1,11 @@
-import boto3
-
-def disable_cloudwatch_alarms(alarm_names, region_name):
-    aws_session = boto3.Session(region_name=region_name)
-    cloudwatch = aws_session.client('cloudwatch')
-
-    try:
-        # アラーム名のリストを無効にする
-        cloudwatch.disable_alarm_actions(AlarmNames=alarm_names)
-        print(f"{len(alarm_names)} 個のCloudWatchアラームを無効にしました。")
-    except Exception as e:
-        print(f"CloudWatchアラームの無効化中にエラーが発生しました: {str(e)}")
-
-def lambda_handler(event, context):
-    # 無効にするアラーム名のリストをここで設定
-    alarm_names_to_disable = [
-        'AlarmName1',
-        'AlarmName2',
-        'AlarmName3',
-        # 他のアラーム名を追加
+{
+  "source": ["aws.rds"],
+  "detail-type": ["AWS API Call via CloudTrail"],
+  "detail": {
+    "eventSource": ["rds.amazonaws.com"],
+    "eventName": [
+      "FailoverDBCluster",
+      "FailoverDBInstance"
     ]
-
-    region_name = 'us-east-1'  # アラームのリージョンを指定
-
-    # 30個のアラームを無効にする
-    disable_cloudwatch_alarms(alarm_names_to_disable, region_name)
-
-if __name__ == '__main__':
-    lambda_handler(None, None)
+  }
+}

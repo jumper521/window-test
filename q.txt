@@ -1,23 +1,29 @@
 import boto3
 
-def disable_all_cloudwatch_alarms(event, context):
-    # Lambda関数が使用するIAMロールには、必要なCloudWatchアラームの無効化権限を付与してください。
-    # このIAMロールはLambda関数を実行する際に使用されます。
-
-    region_name = 'us-east-1'  # アラームのリージョンを指定
+def disable_cloudwatch_alarms(alarm_names, region_name):
     aws_session = boto3.Session(region_name=region_name)
-
-    # AWSセッションを使用してCloudWatchクライアントを作成
     cloudwatch = aws_session.client('cloudwatch')
 
     try:
-        # すべてのCloudWatchアラームのアクションを無効にする
-        alarms = cloudwatch.describe_alarms()
-        alarm_names = [alarm['AlarmName'] for alarm in alarms['MetricAlarms']]
+        # アラーム名のリストを無効にする
         cloudwatch.disable_alarm_actions(AlarmNames=alarm_names)
         print(f"{len(alarm_names)} 個のCloudWatchアラームを無効にしました。")
     except Exception as e:
         print(f"CloudWatchアラームの無効化中にエラーが発生しました: {str(e)}")
 
+def lambda_handler(event, context):
+    # 無効にするアラーム名のリストをここで設定
+    alarm_names_to_disable = [
+        'AlarmName1',
+        'AlarmName2',
+        'AlarmName3',
+        # 他のアラーム名を追加
+    ]
+
+    region_name = 'us-east-1'  # アラームのリージョンを指定
+
+    # 30個のアラームを無効にする
+    disable_cloudwatch_alarms(alarm_names_to_disable, region_name)
+
 if __name__ == '__main__':
-    disable_all_cloudwatch_alarms(None, None)
+    lambda_handler(None, None)

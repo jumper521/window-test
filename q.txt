@@ -1,11 +1,41 @@
-{
-  "source": ["aws.rds"],
-  "detail-type": ["AWS API Call via CloudTrail"],
-  "detail": {
-    "eventSource": ["rds.amazonaws.com"],
-    "eventName": [
-      "FailoverDBCluster",
-      "FailoverDBInstance"
-    ]
-  }
-}
+import boto3
+
+def lambda_handler(event, context):
+    # CodedeployのデプロイメントイベントからName Tagを取得
+    codedeploy_event = event.get("codedeploy_event", {})
+    name_tag = codedeploy_event.get("name_tag", "")
+
+    # AWS EC2およびCloudWatch Alarmsのクライアントを初期化
+    ec2_client = boto3.client("ec2")
+    cloudwatch_client = boto3.client("cloudwatch")
+
+    # AインスタンスとBインスタンスのIDを設定（ここでは仮の値として示しています）
+    a_instance_id = "i-XXXXXXXXXXXXX"  # AインスタンスのID
+    b_instance_id = "i-YYYYYYYYYYYYY"  # BインスタンスのID
+
+    # AとBのName Tagに基づいてインスタンスを切り替え
+    if name_tag == "A":
+        # Bインスタンスを停止
+        ec2_client.stop_instances(InstanceIds=[b_instance_id])
+        # mvne-test-A-1a名称のアラーム状態がOKになるまで待つ
+        while True:
+            response = cloudwatch_client.describe_alarms(AlarmNames=["mvne-test-A-1a"])
+            alarm = response["MetricAlarms"][0]
+            if alarm["StateValue"] == "OK":
+                break
+
+    elif name_tag == "B":
+        # Aインスタンスを停止
+        ec2_client.stop_instances(InstanceIds=[a_instance_id])
+        # mvne-test-B-1a名称のアラーム状態がOKになるまで待つ
+        while True:
+            response = cloudwatch_client.describe_alarms(AlarmNames=["mvne-test-B-1a"])
+            alarm = response["MetricAlarms"][0]
+            if alarm["StateValue"] == "OK":
+                break
+
+    # 処理が完了したらステータスコード200を返す
+    return {
+        "statusCode": 200,
+        "body": "Success"
+    }

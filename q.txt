@@ -35,7 +35,21 @@ def lambda_handler(event, context):
                     if alarm_status['MetricAlarms'][0]['StateValue'] == 'OK':
                         break
                     # ウェイトやリトライロジックを追加できます
-    
+
+    # ④ アラームの状態がOKになったら、タグ名を変更
+    for instance_id in instance_ids:
+        response = ec2_client.describe_instances(InstanceIds=[instance_id])
+        if 'Reservations' in response and response['Reservations']:
+            instance = response['Reservations'][0]['Instances'][0]
+            for tag in instance['Tags']:
+                if tag['Key'] == 'Server':
+                    if tag['Value'] == 'ACT':
+                        # インスタンスのタグをServer:STBに変更
+                        ec2_client.create_tags(Resources=[instance_id], Tags=[{'Key': 'Server', 'Value': 'STB'}])
+                    elif tag['Value'] == 'STB':
+                        # インスタンスのタグをServer:ACTに変更
+                        ec2_client.create_tags(Resources=[instance_id], Tags=[{'Key': 'Server', 'Value': 'ACT'}])
+
     return {
         'statusCode': 200,
         'body': 'Lambda function executed successfully'

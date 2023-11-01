@@ -1,54 +1,56 @@
 import boto3
+import time
+
+def wait_for_snapshot_completion(rds_client, snapshot_identifier):
+    while True:
+        snapshot = rds_client.describe_db_snapshots(DBSnapshotIdentifier=snapshot_identifier)
+        if snapshot and snapshot['DBSnapshots']:
+            snapshot_status = snapshot['DBSnapshots'][0]['Status']
+            if snapshot_status == "available":
+                break
+            elif snapshot_status in ["failed", "incompatible-credentials"]:
+                raise Exception(f"Snapshot creation failed with status: {snapshot_status}.")
+        time.sleep(30)  # 30秒ごとにポーリング
 
 def lambda_handler(event, context):
-    # ① インスタンスIDとCloudWatchアラームを定義
-    instance_ids = ["i-1", "i-2"]
-    cloudwatch_alarms = ["alarm-1", "alarm-2"]
-    
-    # AWSのクライアントを作成
-    ec2_client = boto3.client('ec2')
-    cloudwatch_client = boto3.client('cloudwatch')
-    
-    # ② インスタンスのタグを取得して、Server:ACTのインスタンスを停止
-    for instance_id in instance_ids:
-        response = ec2_client.describe_instances(InstanceIds=[instance_id])
-        if 'Reservations' in response and response['Reservations']:
-            instance = response['Reservations'][0]['Instances'][0]
-            for tag in instance['Tags']:
-                if tag['Key'] == 'Server' and tag['Value'] == 'ACT':
-                    # インスタンスを停止
-                    ec2_client.stop_instances(InstanceIds=[instance_id])
-    
-    # ③ タグ名Server:STBのインスタンスのCloudWatchアラームのステータスを確認
-    for alarm_name in cloudwatch_alarms:
-        alarm_status = cloudwatch_client.describe_alarm_history(
-            AlarmName=alarm_name,
-            HistoryItemType='StateUpdate'
-        )
-        # 最新のアラームステータスを取得
-        if 'AlarmHistoryItems' in alarm_status and alarm_status['AlarmHistoryItems']:
-            latest_status = alarm_status['AlarmHistoryItems'][0]['HistoryData']
-            if "StateValue: OK" not in latest_status:
-                # アラームがOKでない場合、待機
-                while True:
-                    alarm_status = cloudwatch_client.describe_alarms(AlarmNames=[alarm_name])
-                    if alarm_status['MetricAlarms'][0]['StateValue'] == 'OK':
-                        break
-                    # ウェイトやリトライロジックを追加できます
+    rds_instance_id = "your_rds_instance_id"
+    rds_snapshot_identifier = "your_snapshot_identifier"
 
-    # ④ アラームの状態がOKになったら、タグ名を変更
-    for instance_id in instance_ids:
-        response = ec2_client.describe_instances(InstanceIds=[instance_id])
-        if 'Reservations' in response and response['Reservations']:
-            instance = response['Reservations'][0]['Instances'][0]
-            for tag in instance['Tags']:
-                if tag['Key'] == 'Server':
-                    if tag['Value'] == 'ACT':
-                        # インスタンスのタグをServer:STBに変更
-                        ec2_client.create_tags(Resources=[instance_id], Tags=[{'Key': 'Server', 'Value': 'STB'}])
-                    elif tag['Value'] == 'STB':
-                        # インスタンスのタグをServer:ACTに変更
-                        ec2_client.create_tags(Resources=[instance_id], Tags=[{'Key': 'Server', 'Value': 'ACT'}])
+    rds_client = boto3.client('rds')
+
+    # ① RDSインスタンスがバックアップ中かどうかを確認
+    instance_details = rds_client.describe_db_instances(DBInstanceIdentifier=rds_instance_id)
+    if instance_details and instance_details['DBInstances']:
+        instance = instance_details['DBInstances'][0]
+        if instance['DBInstanceStatus'] == 'backing-up':
+            # バックアップ中の場合、エラーを発生させて終了
+            raise Exception("RDS instance is currently being backed up. Aborting.")
+
+    # ② スナップショットの存在を確認
+    existing_snapshots = rds_client.describe_db_snapshots(
+        DBInstanceIdentifier=rds_instance_id,
+        SnapshotType='manual',
+        SnapshotIdentifier=rds_snapshot_identifier
+    )
+
+    if existing_snapshots and existing_snapshots['DBSnapshots']:
+        # スナップショットが存在する場合、スナップショットを削除して新しいスナップショットを作成
+        rds_client.delete_db_snapshot(
+            DBSnapshotIdentifier=rds_snapshot_identifier
+        )
+        rds_client.create_db_snapshot(
+            DBSnapshotIdentifier=rds_snapshot_identifier,
+            DBInstanceIdentifier=rds_instance_id
+        )
+    else:
+        # スナップショットが存在しない場合、新しいスナップショットを作成
+        rds_client.create_db_snapshot(
+            DBSnapshotIdentifier=rds_snapshot_identifier,
+            DBInstanceIdentifier=rds_instance_id
+        )
+
+    # スナップショットの状態が "available" になるまで待つ
+    wait_for_snapshot_completion(rds_client, rds_snapshot_identifier)
 
     return {
         'statusCode': 200,

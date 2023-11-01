@@ -1,41 +1,42 @@
 import boto3
 
 def lambda_handler(event, context):
-    # CodedeployのデプロイメントイベントからName Tagを取得
-    codedeploy_event = event.get("codedeploy_event", {})
-    name_tag = codedeploy_event.get("name_tag", "")
-
-    # AWS EC2およびCloudWatch Alarmsのクライアントを初期化
-    ec2_client = boto3.client("ec2")
-    cloudwatch_client = boto3.client("cloudwatch")
-
-    # AインスタンスとBインスタンスのIDを設定（ここでは仮の値として示しています）
-    a_instance_id = "i-XXXXXXXXXXXXX"  # AインスタンスのID
-    b_instance_id = "i-YYYYYYYYYYYYY"  # BインスタンスのID
-
-    # AとBのName Tagに基づいてインスタンスを切り替え
-    if name_tag == "A":
-        # Bインスタンスを停止
-        ec2_client.stop_instances(InstanceIds=[b_instance_id])
-        # mvne-test-A-1a名称のアラーム状態がOKになるまで待つ
-        while True:
-            response = cloudwatch_client.describe_alarms(AlarmNames=["mvne-test-A-1a"])
-            alarm = response["MetricAlarms"][0]
-            if alarm["StateValue"] == "OK":
-                break
-
-    elif name_tag == "B":
-        # Aインスタンスを停止
-        ec2_client.stop_instances(InstanceIds=[a_instance_id])
-        # mvne-test-B-1a名称のアラーム状態がOKになるまで待つ
-        while True:
-            response = cloudwatch_client.describe_alarms(AlarmNames=["mvne-test-B-1a"])
-            alarm = response["MetricAlarms"][0]
-            if alarm["StateValue"] == "OK":
-                break
-
-    # 処理が完了したらステータスコード200を返す
+    # ① インスタンスIDとCloudWatchアラームを定義
+    instance_ids = ["i-1", "i-2"]
+    cloudwatch_alarms = ["alarm-1", "alarm-2"]
+    
+    # AWSのクライアントを作成
+    ec2_client = boto3.client('ec2')
+    cloudwatch_client = boto3.client('cloudwatch')
+    
+    # ② インスタンスのタグを取得して、Server:ACTのインスタンスを停止
+    for instance_id in instance_ids:
+        response = ec2_client.describe_instances(InstanceIds=[instance_id])
+        if 'Reservations' in response and response['Reservations']:
+            instance = response['Reservations'][0]['Instances'][0]
+            for tag in instance['Tags']:
+                if tag['Key'] == 'Server' and tag['Value'] == 'ACT':
+                    # インスタンスを停止
+                    ec2_client.stop_instances(InstanceIds=[instance_id])
+    
+    # ③ タグ名Server:STBのインスタンスのCloudWatchアラームのステータスを確認
+    for alarm_name in cloudwatch_alarms:
+        alarm_status = cloudwatch_client.describe_alarm_history(
+            AlarmName=alarm_name,
+            HistoryItemType='StateUpdate'
+        )
+        # 最新のアラームステータスを取得
+        if 'AlarmHistoryItems' in alarm_status and alarm_status['AlarmHistoryItems']:
+            latest_status = alarm_status['AlarmHistoryItems'][0]['HistoryData']
+            if "StateValue: OK" not in latest_status:
+                # アラームがOKでない場合、待機
+                while True:
+                    alarm_status = cloudwatch_client.describe_alarms(AlarmNames=[alarm_name])
+                    if alarm_status['MetricAlarms'][0]['StateValue'] == 'OK':
+                        break
+                    # ウェイトやリトライロジックを追加できます
+    
     return {
-        "statusCode": 200,
-        "body": "Success"
+        'statusCode': 200,
+        'body': 'Lambda function executed successfully'
     }

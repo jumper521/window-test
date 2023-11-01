@@ -1,56 +1,55 @@
 import boto3
 import time
 
-def wait_for_snapshot_completion(rds_client, snapshot_identifier):
+def wait_for_snapshot_completion(rds_client, cluster_snapshot_identifier):
     while True:
-        snapshot = rds_client.describe_db_snapshots(DBSnapshotIdentifier=snapshot_identifier)
-        if snapshot and snapshot['DBSnapshots']:
-            snapshot_status = snapshot['DBSnapshots'][0]['Status']
+        snapshot = rds_client.describe_db_cluster_snapshots(DBClusterSnapshotIdentifier=cluster_snapshot_identifier)
+        if snapshot and snapshot['DBClusterSnapshots']:
+            snapshot_status = snapshot['DBClusterSnapshots'][0]['Status']
             if snapshot_status == "available":
                 break
             elif snapshot_status in ["failed", "incompatible-credentials"]:
-                raise Exception(f"Snapshot creation failed with status: {snapshot_status}.")
+                raise Exception(f"Cluster snapshot creation failed with status: {snapshot_status}.")
         time.sleep(30)  # 30秒ごとにポーリング
 
 def lambda_handler(event, context):
-    rds_instance_id = "your_rds_instance_id"
-    rds_snapshot_identifier = "your_snapshot_identifier"
+    rds_cluster_identifier = "your_rds_cluster_identifier"
+    rds_cluster_snapshot_identifier = "your_cluster_snapshot_identifier"
 
     rds_client = boto3.client('rds')
 
-    # ① RDSインスタンスがバックアップ中かどうかを確認
-    instance_details = rds_client.describe_db_instances(DBInstanceIdentifier=rds_instance_id)
-    if instance_details and instance_details['DBInstances']:
-        instance = instance_details['DBInstances'][0]
-        if instance['DBInstanceStatus'] == 'backing-up':
+    # ① RDSクラスターがバックアップ中かどうかを確認
+    cluster_details = rds_client.describe_db_clusters(DBClusterIdentifier=rds_cluster_identifier)
+    if cluster_details and cluster_details['DBClusters']:
+        cluster = cluster_details['DBClusters'][0]
+        if cluster['Status'] == 'backing-up':
             # バックアップ中の場合、エラーを発生させて終了
-            raise Exception("RDS instance is currently being backed up. Aborting.")
+            raise Exception("RDS cluster is currently being backed up. Aborting.")
 
-    # ② スナップショットの存在を確認
-    existing_snapshots = rds_client.describe_db_snapshots(
-        DBInstanceIdentifier=rds_instance_id,
-        SnapshotType='manual',
-        SnapshotIdentifier=rds_snapshot_identifier
+    # ② クラスタースナップショットの存在を確認
+    existing_snapshots = rds_client.describe_db_cluster_snapshots(
+        DBClusterIdentifier=rds_cluster_identifier,
+        DBClusterSnapshotIdentifier=rds_cluster_snapshot_identifier
     )
 
-    if existing_snapshots and existing_snapshots['DBSnapshots']:
-        # スナップショットが存在する場合、スナップショットを削除して新しいスナップショットを作成
-        rds_client.delete_db_snapshot(
-            DBSnapshotIdentifier=rds_snapshot_identifier
+    if existing_snapshots and existing_snapshots['DBClusterSnapshots']:
+        # クラスタースナップショットが存在する場合、クラスタースナップショットを削除して新しいクラスタースナップショットを作成
+        rds_client.delete_db_cluster_snapshot(
+            DBClusterSnapshotIdentifier=rds_cluster_snapshot_identifier
         )
-        rds_client.create_db_snapshot(
-            DBSnapshotIdentifier=rds_snapshot_identifier,
-            DBInstanceIdentifier=rds_instance_id
+        rds_client.create_db_cluster_snapshot(
+            DBClusterSnapshotIdentifier=rds_cluster_snapshot_identifier,
+            DBClusterIdentifier=rds_cluster_identifier
         )
     else:
-        # スナップショットが存在しない場合、新しいスナップショットを作成
-        rds_client.create_db_snapshot(
-            DBSnapshotIdentifier=rds_snapshot_identifier,
-            DBInstanceIdentifier=rds_instance_id
+        # クラスタースナップショットが存在しない場合、新しいクラスタースナップショットを作成
+        rds_client.create_db_cluster_snapshot(
+            DBClusterSnapshotIdentifier=rds_cluster_snapshot_identifier,
+            DBClusterIdentifier=rds_cluster_identifier
         )
 
-    # スナップショットの状態が "available" になるまで待つ
-    wait_for_snapshot_completion(rds_client, rds_snapshot_identifier)
+    # クラスタースナップショットの状態が "available" になるまで待つ
+    wait_for_snapshot_completion(rds_client, rds_cluster_snapshot_identifier)
 
     return {
         'statusCode': 200,

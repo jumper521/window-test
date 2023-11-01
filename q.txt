@@ -1,57 +1,78 @@
 import boto3
-import time
-
-def wait_for_snapshot_completion(rds_client, cluster_snapshot_identifier):
-    while True:
-        snapshot = rds_client.describe_db_cluster_snapshots(DBClusterSnapshotIdentifier=cluster_snapshot_identifier)
-        if snapshot and snapshot['DBClusterSnapshots']:
-            snapshot_status = snapshot['DBClusterSnapshots'][0]['Status']
-            if snapshot_status == "available":
-                break
-            elif snapshot_status in ["failed", "incompatible-credentials"]:
-                raise Exception(f"Cluster snapshot creation failed with status: {snapshot_status}.")
-        time.sleep(30)  # 30秒ごとにポーリング
 
 def lambda_handler(event, context):
-    rds_cluster_identifier = "your_rds_cluster_identifier"
-    rds_cluster_snapshot_identifier = "your_cluster_snapshot_identifier"
-
-    rds_client = boto3.client('rds')
-
-    # ① RDSクラスターがバックアップ中かどうかを確認
-    cluster_details = rds_client.describe_db_clusters(DBClusterIdentifier=rds_cluster_identifier)
-    if cluster_details and cluster_details['DBClusters']:
-        cluster = cluster_details['DBClusters'][0]
-        if cluster['Status'] == 'backing-up':
-            # バックアップ中の場合、エラーを発生させて終了
-            raise Exception("RDS cluster is currently being backed up. Aborting.")
-
-    # ② クラスタースナップショットの存在を確認
-    existing_snapshots = rds_client.describe_db_cluster_snapshots(
-        DBClusterIdentifier=rds_cluster_identifier,
-        DBClusterSnapshotIdentifier=rds_cluster_snapshot_identifier
-    )
-
-    if existing_snapshots and existing_snapshots['DBClusterSnapshots']:
-        # クラスタースナップショットが存在する場合、クラスタースナップショットを削除して新しいクラスタースナップショットを作成
-        rds_client.delete_db_cluster_snapshot(
-            DBClusterSnapshotIdentifier=rds_cluster_snapshot_identifier
-        )
-        rds_client.create_db_cluster_snapshot(
-            DBClusterSnapshotIdentifier=rds_cluster_snapshot_identifier,
-            DBClusterIdentifier=rds_cluster_identifier
-        )
-    else:
-        # クラスタースナップショットが存在しない場合、新しいクラスタースナップショットを作成
-        rds_client.create_db_cluster_snapshot(
-            DBClusterSnapshotIdentifier=rds_cluster_snapshot_identifier,
-            DBClusterIdentifier=rds_cluster_identifier
-        )
-
-    # クラスタースナップショットの状態が "available" になるまで待つ
-    wait_for_snapshot_completion(rds_client, rds_cluster_snapshot_identifier)
-
-    return {
-        'statusCode': 200,
-        'body': 'Lambda function executed successfully'
-    }
+    try:
+        # ① インスタンスIDとCloudWatchアラームを定義
+        instance_ids = ["i-1", "i-2"]
+        cloudwatch_alarms = ["alarm-1", "alarm-2"]
+        
+        # AWSのクライアントを作成
+        ec2_client = boto3.client('ec2')
+        cloudwatch_client = boto3.client('cloudwatch')
+        
+        # ② インスタンスのタグを取得して、Server:ACTのインスタンスを停止
+        for instance_id in instance_ids:
+            response = ec2_client.describe_instances(InstanceIds=[instance_id])
+            if 'Reservations' in response and response['Reservations']:
+                instance = response['Reservations'][0]['Instances'][0]
+                for tag in instance['Tags']:
+                    if tag['Key'] == 'Server' and tag['Value'] == 'ACT':
+                        # インスタンスを停止
+                        ec2_client.stop_instances(InstanceIds=[instance_id])
+                        # ① インスタンスが "stopped" になるまで待機
+                        while True:
+                            response = ec2_client.describe_instances(InstanceIds=[instance_id])
+                            if 'Reservations' in response and response['Reservations']:
+                                instance = response['Reservations'][0]['Instances'][0]
+                                if instance['State']['Name'] == 'stopped':
+                                    break
+                                # ウェイトやリトライロジックを追加できます
+                        # ② "Name" タグを取得
+                        name_tag = ""
+                        for tag in instance['Tags']:
+                            if tag['Key'] == 'Name':
+                                name_tag = tag['Value']
+                        print(f"Name tag of the stopped instance: {name_tag}")
+        
+        # ③ タグ名Server:STBのインスタンスのCloudWatchアラームのステータスを確認
+        for alarm_name in cloudwatch_alarms:
+            alarm_status = cloudwatch_client.describe_alarm_history(
+                AlarmName=alarm_name,
+                HistoryItemType='StateUpdate'
+            )
+            # 最新のアラームステータスを取得
+            if 'AlarmHistoryItems' in alarm_status and alarm_status['AlarmHistoryItems']:
+                latest_status = alarm_status['AlarmHistoryItems'][0]['HistoryData']
+                if "StateValue: OK" not in latest_status:
+                    # アラームがOKでない場合、待機
+                    while True:
+                        alarm_status = cloudwatch_client.describe_alarms(AlarmNames=[alarm_name])
+                        if alarm_status['MetricAlarms'][0]['StateValue'] == 'OK':
+                            break
+                        # ウェイトやリトライロジックを追加できます
+        
+        # ④ アラームの状態がOKになったら、タグ名を変更
+        for instance_id in instance_ids:
+            response = ec2_client.describe_instances(InstanceIds=[instance_id])
+            if 'Reservations' in response and response['Reservations']:
+                instance = response['Reservations'][0]['Instances'][0]
+                for tag in instance['Tags']:
+                    if tag['Key'] == 'Server':
+                        if tag['Value'] == 'ACT':
+                            # インスタンスのタグをServer:STBに変更
+                            ec2_client.create_tags(Resources=[instance_id], Tags=[{'Key': 'Server', 'Value': 'STB'}])
+                        elif tag['Value'] == 'STB':
+                            # インスタンスのタグをServer:ACTに変更
+                            ec2_client.create_tags(Resources=[instance_id], Tags=[{'Key': 'Server', 'Value': 'ACT'}])
+    
+        return {
+            'statusCode': 200,
+            'body': 'Lambda function executed successfully'
+        }
+    except Exception as e:
+        # エラーログを出力
+        print(f"An error occurred: {str(e)}")
+        return {
+            'statusCode': 500,
+            'body': 'Lambda function encountered an error'
+        }

@@ -1,8 +1,9 @@
 import boto3
+import time
 
 def lambda_handler(event, context):
     try:
-        # インスタンスIDとCloudWatchアラームを定義
+        # ① インスタンスIDとCloudWatchアラームを定義
         instance_ids = ["i-1", "i-2"]
         cloudwatch_alarms = ["alarm-1", "alarm-2"]
         
@@ -10,34 +11,62 @@ def lambda_handler(event, context):
         ec2_client = boto3.client('ec2')
         cloudwatch_client = boto3.client('cloudwatch')
         
-        # インスタンスのタグを変更
+        # 最終起動インスタンスを特定
+        last_started_instance_id = None
+        
         for instance_id in instance_ids:
             response = ec2_client.describe_instances(InstanceIds=[instance_id])
             if 'Reservations' in response and response['Reservations']:
                 instance = response['Reservations'][0]['Instances'][0]
-                for tag in instance['Tags']:
-                    if tag['Key'] == 'Server':
-                        if tag['Value'] == 'ACT':
-                            # インスタンスのタグをServer:STBに変更
-                            ec2_client.create_tags(Resources=[instance_id], Tags=[{'Key': 'Server', 'Value': 'STB'}])
-                        elif tag['Value'] == 'STB':
-                            # インスタンスのタグをServer:ACTに変更
-                            ec2_client.create_tags(Resources=[instance_id], Tags=[{'Key': 'Server', 'Value': 'ACT'}])
+                if instance['State']['Name'] == 'running':
+                    last_started_instance_id = instance_id
         
-        # CloudWatchアラームのタグを変更
-        for alarm_name in cloudwatch_alarms:
-            response = cloudwatch_client.describe_alarms(AlarmNames=[alarm_name])
-            if 'MetricAlarms' in response and response['MetricAlarms']:
-                alarm = response['MetricAlarms'][0]
-                for tag in alarm['Tags']:
-                    if tag['Key'] == 'Server':
-                        if tag['Value'] == 'ACT':
-                            # CloudWatchアラームのタグをServer:STBに変更
-                            cloudwatch_client.tag_resource(ResourceARN=alarm['AlarmArn'], Tags=[{'Key': 'Server', 'Value': 'STB'}])
-                        elif tag['Value'] == 'STB':
-                            # CloudWatchアラームのタグをServer:ACTに変更
-                            cloudwatch_client.tag_resource(ResourceARN=alarm['AlarmArn'], Tags=[{'Key': 'Server', 'Value': 'ACT'}])
-        
+        if last_started_instance_id:
+            # インスタンスのタグを取得して、Server:ACTのインスタンスを停止
+            for instance_id in instance_ids:
+                response = ec2_client.describe_instances(InstanceIds=[instance_id])
+                if 'Reservations' in response and response['Reservations']:
+                    instance = response['Reservations'][0]['Instances'][0]
+                    for tag in instance['Tags']:
+                        if tag['Key'] == 'Server' and tag['Value'] == 'ACT':
+                            # インスタンスを停止
+                            ec2_client.stop_instances(InstanceIds=[instance_id])
+                            # ① インスタンスが "stopped" になるまで待機
+                            wait_for_instance_state(ec2_client, instance_id, 'stopped')
+                
+            # タグ名Server:STBのインスタンスを起動後、CloudWatchアラームのステータスを確認
+            for instance_id in instance_ids:
+                response = ec2_client.describe_instances(InstanceIds=[instance_id])
+                if 'Reservations' in response and response['Reservations']:
+                    instance = response['Reservations'][0]['Instances'][0]
+                    for tag in instance['Tags']:
+                        if tag['Key'] == 'Server' and tag['Value'] == 'STB':
+                            # インスタンスを起動
+                            ec2_client.start_instances(InstanceIds=[instance_id])
+                            # ③ インスタンスが "running" になるまで待機
+                            wait_for_instance_state(ec2_client, instance_id, 'running')
+                
+            # 最終起動したインスタンスに関連するCloudWatchアラームの状態を確認
+            for alarm_name in cloudwatch_alarms:
+                wait_for_alarm_ok(cloudwatch_client, alarm_name)
+                print(f"Alarm {alarm_name} is OK for instance {last_started_instance_id}")
+                
+            # インスタンスのタグを差し替え
+            for instance_id in instance_ids:
+                response = ec2_client.describe_instances(InstanceIds=[instance_id])
+                if 'Reservations' in response and response['Reservations']:
+                    instance = response['Reservations'][0]['Instances'][0]
+                    for tag in instance['Tags']:
+                        if tag['Key'] == 'Server':
+                            if tag['Value'] == 'ACT':
+                                # インスタンスのタグをServer:STBに変更
+                                ec2_client.create_tags(Resources=[instance_id], Tags=[{'Key': 'Server', 'Value': 'STB'}])
+                            elif tag['Value'] == 'STB':
+                                # インスタンスのタグをServer:ACTに変更
+                                ec2_client.create_tags(Resources=[instance_id], Tags=[{'Key': 'Server', 'Value': 'ACT'}])
+        else:
+            print("No running instances found.")
+    
         return {
             'statusCode': 200,
             'body': 'Lambda function executed successfully'
@@ -49,3 +78,25 @@ def lambda_handler(event, context):
             'statusCode': 500,
             'body': 'Lambda function encountered an error'
         }
+
+def wait_for_instance_state(ec2_client, instance_id, desired_state, max_retries=10):
+    retries = 0
+    while retries < max_retries:
+        response = ec2_client.describe_instances(InstanceIds=[instance_id])
+        if 'Reservations' in response and response['Reservations']:
+            instance = response['Reservations'][0]['Instances'][0]
+            if instance['State']['Name'] == desired_state:
+                return
+        time.sleep(30)  # 30秒待機
+        retries += 1
+    raise Exception(f"Timed out waiting for instance {instance_id} to be {desired_state}")
+
+def wait_for_alarm_ok(cloudwatch_client, alarm_name, max_retries=10):
+    retries = 0
+    while retries < max_retries:
+        alarm_status = cloudwatch_client.describe_alarms(AlarmNames=[alarm_name])
+        if alarm_status['MetricAlarms'][0]['StateValue'] == 'OK':
+            return
+        time.sleep(30)  # 30秒待機
+        retries += 1
+    raise Exception(f"Timed out waiting for Alarm {alarm_name} to be OK")

@@ -1,60 +1,51 @@
 import boto3
 
 def lambda_handler(event, context):
-    # スナップショットの識別子と復元後のDBクラスター識別子を指定します
-    snapshot_identifier = 'YOUR_RDS_SNAPSHOT_IDENTIFIER'
-    restored_cluster_identifier = 'NEW_RDS_CLUSTER_IDENTIFIER'
-
-    # AWSリージョンを指定します
-    region = 'us-east-1'  # クラスターを復元するリージョンに合わせて変更してください
-
-    # Boto3のRDSクラスタークライアントを作成します
-    rds_client = boto3.client('rds', region_name=region)
-
     try:
-        # スナップショットからDBクラスターを復元します
-        response = rds_client.restore_db_cluster_from_snapshot(
-            DBClusterIdentifier=restored_cluster_identifier,
-            SnapshotIdentifier=snapshot_identifier,
-            Engine='aurora',  # エンジンに合わせて変更
-            EngineVersion='5.6.10a',  # エンジンバージョンに合わせて変更
-            DBSubnetGroupName='default',
-            VpcSecurityGroupIds=[
-                'YOUR_SECURITY_GROUP_ID',
-            ],
-            AvailabilityZones=[
-                'us-east-1a',  # 利用可能なゾーンに合わせて変更
-            ],
-            Port=3306,  # ポート番号に合わせて変更
-            MasterUsername='YOUR_MASTER_USERNAME',
-            MasterUserPassword='YOUR_MASTER_PASSWORD',
-            PreferredBackupWindow='07:00-09:00',  # 好みに合わせて変更
-            PreferredMaintenanceWindow='sun:05:00-sun:06:00',  # 好みに合わせて変更
-        )
-
-        # 復元が正常に完了した場合
-        # 新しいRDSインスタンスを作成
-        rds_instance_identifier = 'NEW_RDS_INSTANCE_IDENTIFIER'
-        response = rds_client.create_db_instance(
-            DBInstanceIdentifier=rds_instance_identifier,
-            DBInstanceClass='db.t2.micro',  # インスタンスタイプを指定
-            Engine='aurora',
-            DBParameterGroupName='default.aurora-mysql5.7',
-            DBSubnetGroupName='default',
-            VpcSecurityGroupIds=[
-                'YOUR_SECURITY_GROUP_ID',
-            ],
-            MasterUsername='YOUR_MASTER_USERNAME',
-            MasterUserPassword='YOUR_MASTER_PASSWORD',
-        )
-
+        # インスタンスIDとCloudWatchアラームを定義
+        instance_ids = ["i-1", "i-2"]
+        cloudwatch_alarms = ["alarm-1", "alarm-2"]
+        
+        # AWSのクライアントを作成
+        ec2_client = boto3.client('ec2')
+        cloudwatch_client = boto3.client('cloudwatch')
+        
+        # インスタンスのタグを変更
+        for instance_id in instance_ids:
+            response = ec2_client.describe_instances(InstanceIds=[instance_id])
+            if 'Reservations' in response and response['Reservations']:
+                instance = response['Reservations'][0]['Instances'][0]
+                for tag in instance['Tags']:
+                    if tag['Key'] == 'Server':
+                        if tag['Value'] == 'ACT':
+                            # インスタンスのタグをServer:STBに変更
+                            ec2_client.create_tags(Resources=[instance_id], Tags=[{'Key': 'Server', 'Value': 'STB'}])
+                        elif tag['Value'] == 'STB':
+                            # インスタンスのタグをServer:ACTに変更
+                            ec2_client.create_tags(Resources=[instance_id], Tags=[{'Key': 'Server', 'Value': 'ACT'}])
+        
+        # CloudWatchアラームのタグを変更
+        for alarm_name in cloudwatch_alarms:
+            response = cloudwatch_client.describe_alarms(AlarmNames=[alarm_name])
+            if 'MetricAlarms' in response and response['MetricAlarms']:
+                alarm = response['MetricAlarms'][0]
+                for tag in alarm['Tags']:
+                    if tag['Key'] == 'Server':
+                        if tag['Value'] == 'ACT':
+                            # CloudWatchアラームのタグをServer:STBに変更
+                            cloudwatch_client.tag_resource(ResourceARN=alarm['AlarmArn'], Tags=[{'Key': 'Server', 'Value': 'STB'}])
+                        elif tag['Value'] == 'STB':
+                            # CloudWatchアラームのタグをServer:ACTに変更
+                            cloudwatch_client.tag_resource(ResourceARN=alarm['AlarmArn'], Tags=[{'Key': 'Server', 'Value': 'ACT'}])
+        
         return {
             'statusCode': 200,
-            'body': f"DBクラスター {restored_cluster_identifier} をスナップショット {snapshot_identifier} から復元し、新しいRDSインスタンス {rds_instance_identifier} を作成しました。"
+            'body': 'Lambda function executed successfully'
         }
     except Exception as e:
-        # エラーメッセージを返します
+        # エラーログを出力
+        print(f"An error occurred: {str(e)}")
         return {
             'statusCode': 500,
-            'body': f"DBクラスターの復元中にエラーが発生しました: {str(e)}"
+            'body': 'Lambda function encountered an error'
         }

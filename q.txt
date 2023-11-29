@@ -1,7 +1,6 @@
 import tkinter as tk
 from tkinter import messagebox, simpledialog, ttk
 import boto3
-import threading
 import time
 
 def get_mfa_credentials(mfa_serial_number, mfa_token):
@@ -29,23 +28,22 @@ def start_all_pipelines(client, pipelines):
     except Exception as e:
         messagebox.showerror("Error", str(e))
 
-def refresh_pipeline_status(client, pipelines, pipeline_status, approve_buttons):
-    while True:
-        try:
-            for pipeline in pipelines:
-                response = client.get_pipeline_state(name=pipeline)
-                latest_state = response['stageStates'][0]['latestExecution']['status']
-                pipeline_status[pipeline].set(latest_state)
+def refresh_pipeline_status(app, client, pipelines, pipeline_status, approve_buttons):
+    try:
+        for pipeline in pipelines:
+            response = client.get_pipeline_state(name=pipeline)
+            latest_state = response['stageStates'][0]['latestExecution']['status']
+            app.after(0, lambda p=pipeline, s=latest_state: pipeline_status[p].set(s))
 
-                # 承認アクションが必要かチェック
-                for action_state in response['stageStates']:
-                    if action_state.get('latestExecution', {}).get('status') == 'WaitingForApproval':
-                        approve_buttons[pipeline].config(state=tk.NORMAL, bg='green')
-                    else:
-                        approve_buttons[pipeline].config(state=tk.DISABLED, bg='grey')
-            time.sleep(10)  # 10秒ごとに更新
-        except Exception as e:
-            messagebox.showerror("Error", str(e))
+            # 承認アクションが必要かチェック
+            for action_state in response['stageStates']:
+                if action_state.get('latestExecution', {}).get('status') == 'WaitingForApproval':
+                    app.after(0, lambda p=pipeline: approve_buttons[p].config(state=tk.NORMAL, bg='green'))
+                else:
+                    app.after(0, lambda p=pipeline: approve_buttons[p].config(state=tk.DISABLED, bg='grey'))
+        app.after(10000, lambda: refresh_pipeline_status(app, client, pipelines, pipeline_status, approve_buttons))  # 10秒後に再度実行
+    except Exception as e:
+        app.after(0, lambda: messagebox.showerror("Error", str(e)))
 
 def approve_action(pipeline):
     messagebox.showinfo("Approved", f"Pipeline {pipeline} approved!")
@@ -69,8 +67,7 @@ def create_app(aws_credentials, pipelines):
         approve_button.grid(row=i+1, column=2, padx=5, pady=5)
         approve_buttons[pipeline] = approve_button
 
-    # ステータス更新スレッドの開始
-    threading.Thread(target=refresh_pipeline_status, args=(client, pipelines, pipeline_status, approve_buttons), daemon=True).start()
+    refresh_pipeline_status(app, client, pipelines, pipeline_status, approve_buttons)
 
     return app
 

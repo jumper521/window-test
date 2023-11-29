@@ -7,7 +7,7 @@ import time
 # AWS CodePipeline のクライアントを作成
 client = boto3.client('codepipeline')
 
-# パイプラインの名前を設定（実際の環境に合わせて変更）
+# パイプラインの名前を設定
 pipelines = ["Pipeline1", "Pipeline2", "Pipeline3"]
 
 def start_all_pipelines():
@@ -18,7 +18,7 @@ def start_all_pipelines():
     except Exception as e:
         messagebox.showerror("Error", str(e))
 
-def refresh_pipeline_status(app, pipeline_status, approve_buttons):
+def refresh_pipeline_status(pipeline_status, approve_buttons):
     while True:
         try:
             for pipeline in pipelines:
@@ -32,10 +32,9 @@ def refresh_pipeline_status(app, pipeline_status, approve_buttons):
                         approve_buttons[pipeline].config(state=tk.NORMAL, bg='green')
                     else:
                         approve_buttons[pipeline].config(state=tk.DISABLED, bg='grey')
-            time.sleep(10)
+            time.sleep(10)  # 10秒ごとに更新
         except Exception as e:
             messagebox.showerror("Error", str(e))
-        time.sleep(10)
 
 def approve_action(pipeline):
     # 承認処理をここに実装
@@ -50,20 +49,16 @@ def create_app():
 
     ttk.Button(app, text="Start All Pipelines", command=start_all_pipelines).grid(row=0, column=0, columnspan=3, pady=10)
 
-    row = 1
-    for pipeline in pipelines:
-        ttk.Label(app, text=pipeline).grid(row=row, column=0, padx=5, pady=5)
-        status_label = ttk.Label(app, textvariable=pipeline_status[pipeline])
-        status_label.grid(row=row, column=1, padx=5, pady=5)
+    for i, pipeline in enumerate(pipelines):
+        ttk.Label(app, text=pipeline).grid(row=i+1, column=0, padx=5, pady=5)
+        ttk.Label(app, textvariable=pipeline_status[pipeline]).grid(row=i+1, column=1, padx=5, pady=5)
 
         approve_button = ttk.Button(app, text=f"Approve {pipeline}", command=lambda p=pipeline: approve_action(p), state=tk.DISABLED)
-        approve_button.grid(row=row, column=2, padx=5, pady=5)
+        approve_button.grid(row=i+1, column=2, padx=5, pady=5)
         approve_buttons[pipeline] = approve_button
 
-        row += 1
-
     # ステータス更新スレッドの開始
-    threading.Thread(target=refresh_pipeline_status, args=(app, pipeline_status, approve_buttons), daemon=True).start()
+    threading.Thread(target=refresh_pipeline_status, args=(pipeline_status, approve_buttons), daemon=True).start()
 
     return app
 

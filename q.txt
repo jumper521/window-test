@@ -1,81 +1,72 @@
+import tkinter as tk
+from tkinter import messagebox, ttk
 import boto3
+import threading
+import time
 
-def lambda_handler(event, context):
+# AWS CodePipeline のクライアントを作成
+client = boto3.client('codepipeline')
+
+# パイプラインの名前を設定（実際の環境に合わせて変更）
+pipelines = ["Pipeline1", "Pipeline2", "Pipeline3"]
+
+def start_all_pipelines():
     try:
-        # ① インスタンスIDとCloudWatchアラームを定義
-        instance_ids = ["i-1", "i-2"]
-        cloudwatch_alarms = ["alarm-1", "alarm-2"]
-        
-        # AWSのクライアントを作成
-        ec2_client = boto3.client('ec2')
-        cloudwatch_client = boto3.client('cloudwatch')
-        
-        # ② インスタンスのタグを取得して、Server:ACTのインスタンスを停止
-        for instance_id in instance_ids:
-            response = ec2_client.describe_instances(InstanceIds=[instance_id])
-            if 'Reservations' in response and response['Reservations']:
-                instance = response['Reservations'][0]['Instances'][0]
-                for tag in instance['Tags']:
-                    if tag['Key'] == 'Server' and tag['Value'] == 'ACT':
-                        # インスタンスを停止
-                        ec2_client.stop_instances(InstanceIds=[instance_id])
-                        # ① インスタンスが "stopped" になるまで待機
-                        while True:
-                            response = ec2_client.describe_instances(InstanceIds=[instance_id])
-                            if 'Reservations' in response and response['Reservations']:
-                                instance = response['Reservations'][0]['Instances'][0]
-                                if instance['State']['Name'] == 'stopped':
-                                    break
-                                # ウェイトやリトライロジックを追加できます
-        
-        # ④ タグ名Server:STBのインスタンスを起動後、CloudWatchアラームのステータスを確認
-        for instance_id in instance_ids:
-            response = ec2_client.describe_instances(InstanceIds=[instance_id])
-            if 'Reservations' in response and response['Reservations']:
-                instance = response['Reservations'][0]['Instances'][0]
-                for tag in instance['Tags']:
-                    if tag['Key'] == 'Server' and tag['Value'] == 'STB':
-                        # インスタンスを起動
-                        ec2_client.start_instances(InstanceIds=[instance_id])
-                        # ③ インスタンスが "running" になるまで待機
-                        while True:
-                            response = ec2_client.describe_instances(InstanceIds=[instance_id])
-                            if 'Reservations' in response and response['Reservations']:
-                                instance = response['Reservations'][0]['Instances'][0]
-                                if instance['State']['Name'] == 'running':
-                                    break
-                                # ウェイトやリトライロジックを追加できます
-        
-        # ③ "StateValue: OK" になるまでアラームのステータスを確認
-        for alarm_name in cloudwatch_alarms:
-            while True:
-                alarm_status = cloudwatch_client.describe_alarms(AlarmNames=[alarm_name])
-                if alarm_status['MetricAlarms'][0]['StateValue'] == 'OK':
-                    break
-                # ウェイトやリトライロジックを追加できます
-        
-        # ⑤ タグ名を差し替え
-        for instance_id in instance_ids:
-            response = ec2_client.describe_instances(InstanceIds=[instance_id])
-            if 'Reservations' in response and response['Reservations']:
-                instance = response['Reservations'][0]['Instances'][0]
-                for tag in instance['Tags']:
-                    if tag['Key'] == 'Server':
-                        if tag['Value'] == 'ACT':
-                            # インスタンスのタグをServer:STBに変更
-                            ec2_client.create_tags(Resources=[instance_id], Tags=[{'Key': 'Server', 'Value': 'STB'}])
-                        elif tag['Value'] == 'STB':
-                            # インスタンスのタグをServer:ACTに変更
-                            ec2_client.create_tags(Resources=[instance_id], Tags=[{'Key': 'Server', 'Value': 'ACT'}])
-    
-        return {
-            'statusCode': 200,
-            'body': 'Lambda function executed successfully'
-        }
+        for pipeline in pipelines:
+            client.start_pipeline_execution(name=pipeline)
+        messagebox.showinfo("Success", "All pipelines started successfully!")
     except Exception as e:
-        # エラーログを出力
-        print(f"An error occurred: {str(e)}")
-        return {
-            'statusCode': 500,
-            'body': 'Lambda function encountered an error'
-        }
+        messagebox.showerror("Error", str(e))
+
+def refresh_pipeline_status(app, pipeline_status, approve_buttons):
+    while True:
+        try:
+            for pipeline in pipelines:
+                response = client.get_pipeline_state(name=pipeline)
+                latest_state = response['stageStates'][0]['latestExecution']['status']
+                pipeline_status[pipeline].set(latest_state)
+
+                # 承認アクションが必要かチェック
+                for action_state in response['stageStates']:
+                    if action_state.get('latestExecution', {}).get('status') == 'WaitingForApproval':
+                        approve_buttons[pipeline].config(state=tk.NORMAL, bg='green')
+                    else:
+                        approve_buttons[pipeline].config(state=tk.DISABLED, bg='grey')
+            time.sleep(10)
+        except Exception as e:
+            messagebox.showerror("Error", str(e))
+        time.sleep(10)
+
+def approve_action(pipeline):
+    # 承認処理をここに実装
+    messagebox.showinfo("Approved", f"Pipeline {pipeline} approved!")
+
+def create_app():
+    app = tk.Tk()
+    app.title("AWS CodePipeline Controller")
+
+    pipeline_status = {pipeline: tk.StringVar(value="Unknown") for pipeline in pipelines}
+    approve_buttons = {}
+
+    ttk.Button(app, text="Start All Pipelines", command=start_all_pipelines).grid(row=0, column=0, columnspan=3, pady=10)
+
+    row = 1
+    for pipeline in pipelines:
+        ttk.Label(app, text=pipeline).grid(row=row, column=0, padx=5, pady=5)
+        status_label = ttk.Label(app, textvariable=pipeline_status[pipeline])
+        status_label.grid(row=row, column=1, padx=5, pady=5)
+
+        approve_button = ttk.Button(app, text=f"Approve {pipeline}", command=lambda p=pipeline: approve_action(p), state=tk.DISABLED)
+        approve_button.grid(row=row, column=2, padx=5, pady=5)
+        approve_buttons[pipeline] = approve_button
+
+        row += 1
+
+    # ステータス更新スレッドの開始
+    threading.Thread(target=refresh_pipeline_status, args=(app, pipeline_status, approve_buttons), daemon=True).start()
+
+    return app
+
+if __name__ == "__main__":
+    app = create_app()
+    app.mainloop()

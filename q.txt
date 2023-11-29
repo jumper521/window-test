@@ -21,31 +21,66 @@ def create_aws_client(service, aws_credentials):
         aws_session_token=aws_credentials['SessionToken']
     )
 
-def authenticate_with_mfa(mfa_serial_number):
-    mfa_token = simpledialog.askstring("MFA Authentication", "Enter your MFA code:", parent=tk.Tk())
-    if mfa_token:
-        return get_mfa_credentials(mfa_serial_number, mfa_token)
-    else:
-        messagebox.showerror("Error", "MFA Authentication failed")
-        exit()
+def start_all_pipelines(client, pipelines):
+    try:
+        for pipeline in pipelines:
+            client.start_pipeline_execution(name=pipeline)
+        messagebox.showinfo("Success", "All pipelines started successfully!")
+    except Exception as e:
+        messagebox.showerror("Error", str(e))
 
-# 以前の関数はそのまま残す
-# ...
+def refresh_pipeline_status(client, pipelines, pipeline_status, approve_buttons):
+    while True:
+        try:
+            for pipeline in pipelines:
+                response = client.get_pipeline_state(name=pipeline)
+                latest_state = response['stageStates'][0]['latestExecution']['status']
+                pipeline_status[pipeline].set(latest_state)
 
-def create_app(mfa_serial_number):
+                # 承認アクションが必要かチェック
+                for action_state in response['stageStates']:
+                    if action_state.get('latestExecution', {}).get('status') == 'WaitingForApproval':
+                        approve_buttons[pipeline].config(state=tk.NORMAL, bg='green')
+                    else:
+                        approve_buttons[pipeline].config(state=tk.DISABLED, bg='grey')
+            time.sleep(10)  # 10秒ごとに更新
+        except Exception as e:
+            messagebox.showerror("Error", str(e))
+
+def approve_action(pipeline):
+    messagebox.showinfo("Approved", f"Pipeline {pipeline} approved!")
+
+def create_app(aws_credentials, pipelines):
     app = tk.Tk()
-    app.withdraw()  # 一時的にルートウィンドウを隠す
-    aws_credentials = authenticate_with_mfa(mfa_serial_number)
-    client = create_aws_client('codepipeline', aws_credentials)
-    app.deiconify()  # ルートウィンドウを再表示
+    app.title("AWS CodePipeline Controller")
 
-    # 以前のcreate_app関数の内容をここに移動
-    # ...
+    client = create_aws_client('codepipeline', aws_credentials)
+
+    pipeline_status = {pipeline: tk.StringVar(value="Unknown") for pipeline in pipelines}
+    approve_buttons = {}
+
+    ttk.Button(app, text="Start All Pipelines", command=lambda: start_all_pipelines(client, pipelines)).grid(row=0, column=0, columnspan=3, pady=10)
+
+    for i, pipeline in enumerate(pipelines):
+        ttk.Label(app, text=pipeline).grid(row=i+1, column=0, padx=5, pady=5)
+        ttk.Label(app, textvariable=pipeline_status[pipeline]).grid(row=i+1, column=1, padx=5, pady=5)
+
+        approve_button = ttk.Button(app, text=f"Approve {pipeline}", command=lambda p=pipeline: approve_action(p), state=tk.DISABLED)
+        approve_button.grid(row=i+1, column=2, padx=5, pady=5)
+        approve_buttons[pipeline] = approve_button
+
+    # ステータス更新スレッドの開始
+    threading.Thread(target=refresh_pipeline_status, args=(client, pipelines, pipeline_status, approve_buttons), daemon=True).start()
 
     return app
 
 if __name__ == "__main__":
     mfa_serial_number = 'arn:aws:iam::123456789012:mfa/your-username'  # MFAデバイスのARNを設定
-    pipelines = ["Pipeline1", "Pipeline2", "Pipeline3"]
-    app = create_app(mfa_serial_number)
-    app.mainloop()
+    mfa_token = simpledialog.askstring("MFA Authentication", "Enter your MFA code:", parent=tk.Tk())
+    if mfa_token:
+        aws_credentials = get_mfa_credentials(mfa_serial_number, mfa_token)
+        pipelines = ["Pipeline1", "Pipeline2", "Pipeline3"]
+        app = create_app(aws_credentials, pipelines)
+        app.mainloop()
+    else:
+        messagebox.showerror("Error", "MFA Authentication failed")

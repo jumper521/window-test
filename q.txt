@@ -41,7 +41,7 @@ def refresh_pipeline_status(app, client, pipelines, pipeline_status, approve_but
                     app.after(0, lambda p=pipeline: approve_buttons[p].config(state=tk.NORMAL, bg='green'))
                 else:
                     app.after(0, lambda p=pipeline: approve_buttons[p].config(state=tk.DISABLED, bg='grey'))
-        app.after(10000, lambda: refresh_pipeline_status(app, client, pipelines, pipeline_status, approve_buttons))  # 10秒後に再度実行
+        app.after(10000, lambda: refresh_pipeline_status(app, client, pipelines, pipeline_status, approve_buttons))
     except Exception as e:
         app.after(0, lambda: messagebox.showerror("Error", str(e)))
 
@@ -63,7 +63,7 @@ def create_app(aws_credentials, pipelines):
         ttk.Label(app, text=pipeline).grid(row=i+1, column=0, padx=5, pady=5)
         ttk.Label(app, textvariable=pipeline_status[pipeline]).grid(row=i+1, column=1, padx=5, pady=5)
 
-        approve_button = ttk.Button(app, text=f"Approve {pipeline}", command=lambda p=pipeline: approve_action(p), state=tk.DISABLED)
+        approve_button = tk.Button(app, text=f"Approve {pipeline}", command=lambda p=pipeline: approve_action(p), state=tk.DISABLED)
         approve_button.grid(row=i+1, column=2, padx=5, pady=5)
         approve_buttons[pipeline] = approve_button
 

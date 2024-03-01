@@ -1,83 +1,15 @@
-import tkinter as tk
-from tkinter import messagebox, simpledialog, ttk
 import boto3
-import time
 
-def get_mfa_credentials(mfa_serial_number, mfa_token):
-    session = boto3.Session()
-    sts_client = session.client('sts')
-    response = sts_client.get_session_token(
-        SerialNumber=mfa_serial_number,
-        TokenCode=mfa_token
-    )
-    return response['Credentials']
+def lambda_handler(event, context):
+    ecs_client = boto3.client('ecs')
+    cluster_name = 'your-cluster-name'
+    service_names = ['your-service-name1', 'your-service-name2'] # 起動または停止したいサービスのリスト
+    desired_count = 0 # サービスを停止する場合は0、起動する場合は起動したいタスク数
 
-def create_aws_client(service, aws_credentials):
-    return boto3.client(
-        service,
-        aws_access_key_id=aws_credentials['AccessKeyId'],
-        aws_secret_access_key=aws_credentials['SecretAccessKey'],
-        aws_session_token=aws_credentials['SessionToken']
-    )
-
-def start_all_pipelines(client, pipelines):
-    try:
-        for pipeline in pipelines:
-            client.start_pipeline_execution(name=pipeline)
-        messagebox.showinfo("Success", "All pipelines started successfully!")
-    except Exception as e:
-        messagebox.showerror("Error", str(e))
-
-def refresh_pipeline_status(app, client, pipelines, pipeline_status, approve_buttons):
-    try:
-        for pipeline in pipelines:
-            response = client.get_pipeline_state(name=pipeline)
-            latest_state = response['stageStates'][0]['latestExecution']['status']
-            app.after(0, lambda p=pipeline, s=latest_state: pipeline_status[p].set(s))
-
-            # 承認アクションが必要かチェック
-            for action_state in response['stageStates']:
-                if action_state.get('latestExecution', {}).get('status') == 'WaitingForApproval':
-                    app.after(0, lambda p=pipeline: approve_buttons[p].config(state=tk.NORMAL, bg='green'))
-                else:
-                    app.after(0, lambda p=pipeline: approve_buttons[p].config(state=tk.DISABLED, bg='grey'))
-        app.after(10000, lambda: refresh_pipeline_status(app, client, pipelines, pipeline_status, approve_buttons))
-    except Exception as e:
-        app.after(0, lambda: messagebox.showerror("Error", str(e)))
-
-def approve_action(pipeline):
-    messagebox.showinfo("Approved", f"Pipeline {pipeline} approved!")
-
-def create_app(aws_credentials, pipelines):
-    app = tk.Tk()
-    app.title("AWS CodePipeline Controller")
-
-    client = create_aws_client('codepipeline', aws_credentials)
-
-    pipeline_status = {pipeline: tk.StringVar(value="Unknown") for pipeline in pipelines}
-    approve_buttons = {}
-
-    ttk.Button(app, text="Start All Pipelines", command=lambda: start_all_pipelines(client, pipelines)).grid(row=0, column=0, columnspan=3, pady=10)
-
-    for i, pipeline in enumerate(pipelines):
-        ttk.Label(app, text=pipeline).grid(row=i+1, column=0, padx=5, pady=5)
-        ttk.Label(app, textvariable=pipeline_status[pipeline]).grid(row=i+1, column=1, padx=5, pady=5)
-
-        approve_button = tk.Button(app, text=f"Approve {pipeline}", command=lambda p=pipeline: approve_action(p), state=tk.DISABLED)
-        approve_button.grid(row=i+1, column=2, padx=5, pady=5)
-        approve_buttons[pipeline] = approve_button
-
-    refresh_pipeline_status(app, client, pipelines, pipeline_status, approve_buttons)
-
-    return app
-
-if __name__ == "__main__":
-    mfa_serial_number = 'arn:aws:iam::123456789012:mfa/your-username'  # MFAデバイスのARNを設定
-    mfa_token = simpledialog.askstring("MFA Authentication", "Enter your MFA code:", parent=tk.Tk())
-    if mfa_token:
-        aws_credentials = get_mfa_credentials(mfa_serial_number, mfa_token)
-        pipelines = ["Pipeline1", "Pipeline2", "Pipeline3"]
-        app = create_app(aws_credentials, pipelines)
-        app.mainloop()
-    else:
-        messagebox.showerror("Error", "MFA Authentication failed")
+    for service_name in service_names:
+        response = ecs_client.update_service(
+            cluster=cluster_name,
+            service=service_name,
+            desiredCount=desired_count
+        )
+        print(response)
